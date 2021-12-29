@@ -100,7 +100,7 @@ func (r *raft) runElectionTimeout() {
 
 		// 超时
 		if time.Since(r.electionResetEvent) >= timeoutDuration {
-			r.dlog("")
+			r.dlog("选举定时器到时, 开始新一轮选举")
 			r.startElection()
 			r.mu.Unlock()
 			return
@@ -125,7 +125,7 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
-// 成为candidate开始选举运动 (lock状态进入的??)
+// 成为candidate开始选举运动 (lock状态进入的)
 /*
 	等待RequestVoteReply的过程中可能出现以下情况：
 	1.状态改变
@@ -135,35 +135,38 @@ type RequestVoteReply struct {
 func (r *raft) startElection() {
 	r.state = StateCandidate
 	r.Term += 1
-	termStarted := r.Term
+	currentTerm := r.Term
 	r.VotedFor = r.id
 	r.electionResetEvent = time.Now()
-	r.dlog("成为候选人 term=%d , 开始发起选举运动", termStarted)
+	r.dlog("成为候选人 term=%d , 开始发起选举运动", currentTerm)
 
 	var votesReceived int32
 
 	for _, v := range r.peerIds {
 		go func(peerId int) {
 			args := &RequestVoteArgs{
-				Term:        termStarted,
-				CandidateId: peerId,
+				Term:        currentTerm,
+				CandidateId: r.id,
 			}
+			r.dlog("向服务器 %d 发送RequestVote请求", peerId)
 
 			var reply RequestVoteReply
 
-			r.dlog("向服务器 %d 发送RequestVote请求", peerId)
 			if err := r.server.Call(peerId, "Raft.RequestVote", args, reply); err == nil {
+				r.dlog("收到 %d RequestVoteReply", peerId)
+				r.mu.Lock()
+				defer r.mu.Unlock()
 
 				if r.state != StateCandidate {
 					r.dlog("等待其他节点的RequestVoteReply时, 状态变为 %v", r.state)
 					return
 				}
 
-				if reply.Term > termStarted {
+				if reply.Term > currentTerm {
 					r.dlog("收到RequestVoteReply的任期比当前任期高")
 					r.becomeFollower(reply.Term)
 					return
-				} else if reply.Term == termStarted {
+				} else if reply.Term == currentTerm {
 					if reply.VoteGranted {
 						votes := int(atomic.AddInt32(&votesReceived, 1))
 						if votes > (len(r.peerIds)+1)/2 {
@@ -200,17 +203,57 @@ func (r *raft) becomeLeader() {
 			r.sendHeartbeats()
 			<-ticker.C
 
+			r.mu.Lock()
 			if r.state != StateLeader {
+				r.mu.Unlock()
 				return
 			}
+			r.mu.Unlock()
 		}
 	}()
 }
 
+type AppendEntriesArgs struct {
+	Term         int
+	LeaderId     int
+	PreLogIndex  int
+	PreLogTerm   int
+	Entries      []LogEntry
+	LeaderCommit int
+}
+
+type AppendEntriesReply struct {
+	Term    int
+	success bool
+}
+
+// Leader发送心跳
 func (r *raft) sendHeartbeats() {
+	r.mu.Lock()
+	currentTerm := r.Term
+	r.mu.Unlock()
+
 	for _, v := range r.peerIds {
-		go func() {
-			send
-		}()
+		go func(peerId int) {
+			args := &AppendEntriesArgs{
+				Term:     currentTerm,
+				LeaderId: r.id,
+			}
+			r.dlog("向服务器 %d 发送AppendEntries请求", peerId)
+
+			var reply AppendEntriesReply
+
+			if err := r.server.Call(peerId, "Raft.Append", args, reply); err != nil {
+				r.dlog("收到 %d AppendEntriesReply", peerId)
+				r.mu.Lock()
+				defer r.mu.Unlock()
+
+				if reply.Term > currentTerm {
+					r.dlog("收到AppendEntriesReply的任期比当前任期高")
+					r.becomeFollower(reply.Term)
+					return
+				}
+			}
+		}(v)
 	}
 }
