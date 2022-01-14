@@ -1,7 +1,11 @@
 package raft
 
 import (
+	"context"
 	"fmt"
+	pb "github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
+	"google.golang.org/grpc"
+	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -9,8 +13,9 @@ import (
 )
 
 const DeLog = 1
+const None uint32 = 0
 
-type StateType uint64
+type StateType int
 
 const (
 	StateFollower StateType = iota
@@ -22,12 +27,13 @@ const (
 type raft struct {
 	mu sync.Mutex
 
-	id    int
+	id    uint32
 	state StateType
 
-	Term     int
-	VotedFor int
-	peerIds  []int
+	Term        uint32
+	VotedFor    uint32
+	peerClients map[uint32]*grpc.ClientConn
+	//peerIds  []uint32
 
 	server *Server
 
@@ -37,14 +43,14 @@ type raft struct {
 	electionResetEvent time.Time
 }
 
-func newRaft(id int, peerIds []int, server *Server, ready <-chan struct{}) *raft {
+func newRaft(id uint32, peerClients map[uint32]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
 	r := &raft{
 		id:               id,
 		state:            StateFollower,
-		VotedFor:         -1,
-		peerIds:          peerIds,
+		peerClients:      peerClients,
+		VotedFor:         None,
 		server:           server,
-		heartbeatTimeout: 50 * time.Millisecond,
+		heartbeatTimeout: 30 * time.Millisecond,
 	}
 
 	go func() {
@@ -58,10 +64,23 @@ func newRaft(id int, peerIds []int, server *Server, ready <-chan struct{}) *raft
 	return r
 }
 
+func (r *raft) Report() (id uint32, term uint32, isLeader bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.id, r.Term, r.state == StateLeader
+}
+
+func (r *raft) Stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.state = Dead
+	r.dlog("becomes Dead")
+}
+
 func (r *raft) dlog(format string, args ...interface{}) {
 	if DeLog == 1 {
 		sprintf := fmt.Sprintf("[%d]", r.id) + format
-		fmt.Printf(sprintf, args...)
+		log.Printf(sprintf, args...)
 	}
 }
 
@@ -69,7 +88,7 @@ func (r *raft) dlog(format string, args ...interface{}) {
 /*
 	出现以下情况跳出循环：
 	1.状态改变
-	2.任期改变??
+	2.收到投票请求或者心跳的任期改变
 	3.超时
 */
 func (r *raft) runElectionTimeout() {
@@ -91,7 +110,7 @@ func (r *raft) runElectionTimeout() {
 			return
 		}
 
-		// 收到心跳任期改变??
+		// 收到心跳任期改变
 		if termStarted != r.Term {
 			r.dlog("选举定时器的term从 %d 变为 %d, 退出", termStarted, r.Term)
 			r.mu.Unlock()
@@ -99,30 +118,19 @@ func (r *raft) runElectionTimeout() {
 		}
 
 		// 超时
-		if time.Since(r.electionResetEvent) >= timeoutDuration {
+		if elapsed := time.Since(r.electionResetEvent); elapsed >= timeoutDuration {
 			r.dlog("选举定时器到时, 开始新一轮选举")
 			r.startElection()
 			r.mu.Unlock()
 			return
 		}
+		r.mu.Unlock()
 	}
 }
 
 // 生成伪随机的定时器
 func (r *raft) electionTimeout() time.Duration {
 	return time.Duration(150+rand.Intn(150)) * time.Millisecond
-}
-
-type RequestVoteArgs struct {
-	Term         int
-	CandidateId  int
-	LastLogIndex int // index of candidate’s last log entry (§5.4)
-	LastLogTerm  int // term of candidate’s last log entry (§5.4)
-}
-
-type RequestVoteReply struct {
-	Term        int
-	VoteGranted bool
 }
 
 // 成为candidate开始选举运动 (lock状态进入的)
@@ -140,20 +148,23 @@ func (r *raft) startElection() {
 	r.electionResetEvent = time.Now()
 	r.dlog("成为候选人 term=%d , 开始发起选举运动", currentTerm)
 
-	var votesReceived int32
+	var votesReceived uint32
 
-	for _, v := range r.peerIds {
-		go func(peerId int) {
-			args := &RequestVoteArgs{
+	for i := range r.peerClients {
+		go func(peerId uint32) {
+			args := &pb.RequestVoteArgs{
 				Term:        currentTerm,
 				CandidateId: r.id,
 			}
 			r.dlog("向服务器 %d 发送RequestVote请求", peerId)
 
-			var reply RequestVoteReply
+			//var reply RequestVoteReply
 
-			if err := r.server.Call(peerId, "Raft.RequestVote", args, reply); err == nil {
-				r.dlog("收到 %d RequestVoteReply", peerId)
+			//if reply, err := r.server.Call(peerId, "Raft.RequestVote", args); err == nil {
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
+			defer cancelFunc()
+			if reply, err := pb.NewRaftClient(r.peerClients[peerId]).RequestVote(ctx, args); err == nil {
+				r.dlog("收到 %d RequestVoteReply的响应", peerId)
 				r.mu.Lock()
 				defer r.mu.Unlock()
 
@@ -168,8 +179,8 @@ func (r *raft) startElection() {
 					return
 				} else if reply.Term == currentTerm {
 					if reply.VoteGranted {
-						votes := int(atomic.AddInt32(&votesReceived, 1))
-						if votes > (len(r.peerIds)+1)/2 {
+						votes := int(atomic.AddUint32(&votesReceived, 1))
+						if votes > (len(r.peerClients)+1)/2 {
 							r.dlog("以 %d 票数当选Leader", votes)
 							r.becomeLeader()
 							return
@@ -177,17 +188,17 @@ func (r *raft) startElection() {
 					}
 				}
 			}
-		}(v)
+		}(i)
 	}
 
 	// 给peerIds发送完RequestVote后开启定时器
 	go r.runElectionTimeout()
 }
 
-func (r *raft) becomeFollower(term int) {
+func (r *raft) becomeFollower(term uint32) {
 	r.state = StateFollower
 	r.Term = term
-	r.VotedFor = -1
+	r.VotedFor = None
 	r.electionResetEvent = time.Now()
 }
 
@@ -213,38 +224,27 @@ func (r *raft) becomeLeader() {
 	}()
 }
 
-type AppendEntriesArgs struct {
-	Term         int
-	LeaderId     int
-	PreLogIndex  int
-	PreLogTerm   int
-	Entries      []LogEntry
-	LeaderCommit int
-}
-
-type AppendEntriesReply struct {
-	Term    int
-	success bool
-}
-
 // Leader发送心跳
 func (r *raft) sendHeartbeats() {
 	r.mu.Lock()
 	currentTerm := r.Term
 	r.mu.Unlock()
 
-	for _, v := range r.peerIds {
-		go func(peerId int) {
-			args := &AppendEntriesArgs{
+	for i := range r.peerClients {
+		go func(peerId uint32) {
+			args := &pb.AppendEntriesArgs{
 				Term:     currentTerm,
 				LeaderId: r.id,
 			}
 			r.dlog("向服务器 %d 发送AppendEntries请求", peerId)
 
-			var reply AppendEntriesReply
+			//var reply AppendEntriesReply
 
-			if err := r.server.Call(peerId, "Raft.Append", args, reply); err != nil {
-				r.dlog("收到 %d AppendEntriesReply", peerId)
+			//if err := r.server.Call(peerId, "Raft.AppendEntries", args, reply); err != nil {
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
+			defer cancelFunc()
+			if reply, err := pb.NewRaftClient(r.peerClients[peerId]).AppendEntries(ctx, args); err == nil {
+				r.dlog("收到 %d AppendEntriesReply的响应", peerId)
 				r.mu.Lock()
 				defer r.mu.Unlock()
 
@@ -254,6 +254,70 @@ func (r *raft) sendHeartbeats() {
 					return
 				}
 			}
-		}(v)
+		}(i)
 	}
+}
+
+func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply *pb.RequestVoteReply, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state == Dead {
+		return nil, nil
+	}
+	r.dlog("收到RequestVote请求: %+v", args)
+
+	if args.Term > r.Term {
+		r.dlog("当前任期小于RequestVoteArgs的任期, 变为Follower")
+		r.becomeFollower(args.Term)
+	}
+
+	reply = &pb.RequestVoteReply{
+		Term:        0,
+		VoteGranted: false,
+	}
+
+	// 任期相同且没有投过票或已经投过该Candidate
+	if args.Term == r.Term && (r.VotedFor == None || r.VotedFor == args.CandidateId) {
+		reply.VoteGranted = true
+		r.VotedFor = args.CandidateId
+		r.electionResetEvent = time.Now()
+	} else {
+		reply.VoteGranted = false
+	}
+
+	reply.Term = r.Term
+	r.dlog("RequestVote应答: %+v", reply)
+	return reply, nil
+}
+
+func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (reply *pb.AppendEntriesReply, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state == Dead {
+		return nil, nil
+	}
+	r.dlog("收到AppendEntries请求: %+v", args)
+
+	if args.Term > r.Term {
+		r.dlog("当前任期小于AppendEntriesArgs的任期, 变为Follower")
+		r.becomeFollower(args.Term)
+	}
+
+	reply = &pb.AppendEntriesReply{
+		Term:    0,
+		Success: false,
+	}
+
+	if args.Term == r.Term {
+		// 当出现Leader时, 其他人应是Follower
+		if r.state != StateFollower {
+			r.becomeFollower(args.Term)
+		}
+		r.electionResetEvent = time.Now()
+		reply.Success = true
+	}
+
+	reply.Term = r.Term
+	r.dlog("AppendEntries应答: %+v", reply)
+	return reply, nil
 }
