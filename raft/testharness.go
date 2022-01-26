@@ -69,9 +69,8 @@ func NewHarness(t *testing.T, n int) *Harness {
 // CheckSingleLeader checks that only a single server thinks it's the leader.
 // Returns the leader's id and term. It retries several times if no leader is
 // identified yet.
-func (h *Harness) CheckSingleLeader() (uint32, uint32) {
+func (h *Harness) CheckSingleLeader() (leaderId uint32, leaderTerm uint32) {
 	for r := 1; r <= 5; r++ {
-		var leaderId, leaderTerm uint32
 		//leaderTerm := 0
 		for i := 1; i <= h.n; i++ {
 			if h.connected[i] {

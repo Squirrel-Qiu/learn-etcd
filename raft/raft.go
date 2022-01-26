@@ -33,14 +33,16 @@ type raft struct {
 	Term        uint32
 	VotedFor    uint32
 	peerClients map[uint32]*grpc.ClientConn
-	//peerIds  []uint32
 
 	server *Server
 
-	//raftLog *raftLog
+	raftLog *raftLog
 
 	heartbeatTimeout   time.Duration
 	electionResetEvent time.Time
+
+	nextIndex  map[uint32]uint32
+	matchIndex map[uint32]uint32
 }
 
 func newRaft(id uint32, peerClients map[uint32]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
@@ -258,6 +260,12 @@ func (r *raft) sendHeartbeats() {
 	}
 }
 
+//func (r *raft) lastLogIndexAndTerm() (uint32, uint32) {
+//	if r. {
+//
+//	}
+//}
+
 func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply *pb.RequestVoteReply, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -277,7 +285,8 @@ func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply
 	}
 
 	// 任期相同且没有投过票或已经投过该Candidate
-	if args.Term == r.Term && (r.VotedFor == None || r.VotedFor == args.CandidateId) {
+	if args.Term == r.Term &&
+		(r.VotedFor == None || r.VotedFor == args.CandidateId) {
 		reply.VoteGranted = true
 		r.VotedFor = args.CandidateId
 		r.electionResetEvent = time.Now()
