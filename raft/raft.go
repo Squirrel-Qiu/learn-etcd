@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	pb "github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
+	"github.com/Squirrel-Qiu/learn-etcd/storage"
 	"google.golang.org/grpc"
 	"log"
 	"math/rand"
@@ -36,7 +37,7 @@ type raft struct {
 
 	server *Server
 
-	raftLog *raftLog
+	sto storage.Storage
 
 	heartbeatTimeout   time.Duration
 	electionResetEvent time.Time
@@ -160,11 +161,9 @@ func (r *raft) startElection() {
 			}
 			r.dlog("向服务器 %d 发送RequestVote请求", peerId)
 
-			//var reply RequestVoteReply
-
-			//if reply, err := r.server.Call(peerId, "Raft.RequestVote", args); err == nil {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
 			defer cancelFunc()
+
 			if reply, err := pb.NewRaftClient(r.peerClients[peerId]).RequestVote(ctx, args); err == nil {
 				r.dlog("收到 %d RequestVoteReply的响应", peerId)
 				r.mu.Lock()
@@ -234,17 +233,35 @@ func (r *raft) sendHeartbeats() {
 
 	for i := range r.peerClients {
 		go func(peerId uint32) {
-			args := &pb.AppendEntriesArgs{
-				Term:     currentTerm,
-				LeaderId: r.id,
+			r.mu.Lock()
+
+			log := r.sto.Entries()
+			x := r.nextIndex[peerId]
+			preLogIndex := x - 1
+			preLogTerm := uint32(0)
+			if preLogIndex > 0 {
+				preLogTerm = log[preLogIndex].Term
 			}
+
+			entries := log[x:]
+			leaderCommit := r.sto.GetCommitIndex()
+
+			args := &pb.AppendEntriesArgs{
+				Term:         currentTerm,
+				LeaderId:     r.id,
+				PreLogIndex:  preLogIndex,
+				PreLogTerm:   preLogTerm,
+				Entries:      entries,
+				LeaderCommit: leaderCommit,
+			}
+
+			r.mu.Unlock()
+
 			r.dlog("向服务器 %d 发送AppendEntries请求", peerId)
 
-			//var reply AppendEntriesReply
-
-			//if err := r.server.Call(peerId, "Raft.AppendEntries", args, reply); err != nil {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
 			defer cancelFunc()
+
 			if reply, err := pb.NewRaftClient(r.peerClients[peerId]).AppendEntries(ctx, args); err == nil {
 				r.dlog("收到 %d AppendEntriesReply的响应", peerId)
 				r.mu.Lock()
@@ -255,16 +272,50 @@ func (r *raft) sendHeartbeats() {
 					r.becomeFollower(reply.Term)
 					return
 				}
+
+				if r.state == StateLeader && currentTerm == reply.Term {
+					if reply.Success {
+						r.nextIndex[peerId] = x + uint32(len(entries))
+						r.matchIndex[peerId] = r.nextIndex[peerId] - 1
+						r.dlog("收到 %d AppendEntries添加成功的响应: nextIndex= %v, matchIndex= %v", peerId, r.nextIndex[peerId], r.matchIndex[peerId])
+
+						// check commit
+						for i := leaderCommit + 1; i < uint32(len(log)); i++ {
+							if log[i].Term == currentTerm {
+								matchCount := 1
+								for p := range r.peerClients {
+									if r.matchIndex[p] >= i {
+										matchCount++
+									}
+								}
+								if matchCount > (len(r.peerClients)+1)/2 {
+									r.sto.SetCommitIndex(i)
+								}
+							}
+						}
+
+						// if ok commit
+						if r.sto.GetCommitIndex() != leaderCommit {
+							// TODO commit notify
+						}
+					} else {
+						r.nextIndex[peerId] = x - 1
+						r.dlog("收到 %d AppendEntries添加失败的响应: nextIndex= %v", peerId, x-1)
+					}
+				}
 			}
 		}(i)
 	}
 }
 
-//func (r *raft) lastLogIndexAndTerm() (uint32, uint32) {
-//	if r. {
-//
-//	}
-//}
+func (r *raft) lastLogIndexAndTerm() (uint32, uint32) {
+	n := len(r.sto.Entries())
+	if n > 0 {
+		lastLogIndex := uint32(n - 1)
+		return lastLogIndex, r.sto.Entries()[lastLogIndex].Term
+	}
+	return 0, 0
+}
 
 func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply *pb.RequestVoteReply, err error) {
 	r.mu.Lock()
@@ -279,6 +330,8 @@ func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply
 		r.becomeFollower(args.Term)
 	}
 
+	lastLogIndex, lastLogTerm := r.lastLogIndexAndTerm()
+
 	reply = &pb.RequestVoteReply{
 		Term:        0,
 		VoteGranted: false,
@@ -286,7 +339,9 @@ func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply
 
 	// 任期相同且没有投过票或已经投过该Candidate
 	if args.Term == r.Term &&
-		(r.VotedFor == None || r.VotedFor == args.CandidateId) {
+		(r.VotedFor == None || r.VotedFor == args.CandidateId) &&
+		(args.LastLogTerm > lastLogTerm ||
+			(args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)) {
 		reply.VoteGranted = true
 		r.VotedFor = args.CandidateId
 		r.electionResetEvent = time.Now()
@@ -318,11 +373,14 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 	}
 
 	if args.Term == r.Term {
-		// 当出现Leader时, 其他人应是Follower
+		// 当Leader出现时, 其他人都是Follower (Leader唯一)
 		if r.state != StateFollower {
 			r.becomeFollower(args.Term)
 		}
 		r.electionResetEvent = time.Now()
+
+		if args.PreLogIndex {
+		}
 		reply.Success = true
 	}
 

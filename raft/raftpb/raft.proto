@@ -21,12 +21,18 @@ message RequestVoteReply{
   bool VoteGranted = 2;
 }
 
+message Entry {
+  uint32 Term = 1;
+  bytes Data = 2;
+}
+
 message AppendEntriesArgs {
   uint32 Term = 1;
   uint32 LeaderId = 2;
   uint32 PreLogIndex = 3;
   uint32 PreLogTerm = 4;
-  uint32 LeaderCommit = 5;
+  repeated Entry entries = 5;
+  uint32 LeaderCommit = 6;
 }
 
 message AppendEntriesReply {
