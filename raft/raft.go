@@ -235,15 +235,15 @@ func (r *raft) sendHeartbeats() {
 		go func(peerId uint32) {
 			r.mu.Lock()
 
-			log := r.sto.Entries()
+			logs := r.sto.Entries()
 			x := r.nextIndex[peerId]
 			preLogIndex := x - 1
 			preLogTerm := uint32(0)
 			if preLogIndex > 0 {
-				preLogTerm = log[preLogIndex].Term
+				preLogTerm = logs[preLogIndex].Term
 			}
 
-			entries := log[x:]
+			entries := logs[x:]
 			leaderCommit := r.sto.GetCommitIndex()
 
 			args := &pb.AppendEntriesArgs{
@@ -279,9 +279,9 @@ func (r *raft) sendHeartbeats() {
 						r.matchIndex[peerId] = r.nextIndex[peerId] - 1
 						r.dlog("收到 %d AppendEntries添加成功的响应: nextIndex= %v, matchIndex= %v", peerId, r.nextIndex[peerId], r.matchIndex[peerId])
 
-						// check commit
-						for i := leaderCommit + 1; i < uint32(len(log)); i++ {
-							if log[i].Term == currentTerm {
+						// 检查是否有可提交的指令
+						for i := leaderCommit + 1; i < uint32(len(logs)); i++ {
+							if logs[i].Term == currentTerm {
 								matchCount := 1
 								for p := range r.peerClients {
 									if r.matchIndex[p] >= i {
@@ -296,6 +296,7 @@ func (r *raft) sendHeartbeats() {
 
 						// if ok commit
 						if r.sto.GetCommitIndex() != leaderCommit {
+							r.dlog("提交日志, Leader的commitIndex变为 %d", r.sto.GetCommitIndex())
 							// TODO commit notify
 						}
 					} else {
@@ -379,12 +380,51 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 		}
 		r.electionResetEvent = time.Now()
 
-		if args.PreLogIndex {
+		logs := r.sto.Entries()
+		// 检查本地日志在索引PreLogIndex处的任期是否与PreLogTerm匹配
+		if args.PreLogIndex == 0 || (args.PreLogIndex < uint32(len(logs)) && args.PreLogTerm == logs[args.PreLogIndex].Term) {
+			reply.Success = true
+
+			// 寻找插入点
+			logInsertIndex := args.PreLogIndex + 1
+			newEntriesIndex := 0
+
+			for {
+				if logInsertIndex >= uint32(len(logs)) || newEntriesIndex >= len(args.Entries) {
+					break
+				}
+				if logs[logInsertIndex].Term != args.Entries[newEntriesIndex].Term {
+					break
+				}
+				logInsertIndex++
+				newEntriesIndex++
+			}
+
+			// 循环结束时:
+			// - logInsertIndex指向本地日志结尾,或与Leader发送的日志(请求条目)之间存在冲突的索引位置
+			// - newEntriesIndex指向请求条目开始插入的索引位置
+			if newEntriesIndex < len(args.Entries) {
+				r.dlog("从索引 %d 处开始插入以下日志 %v", logInsertIndex, args.Entries[newEntriesIndex:])
+				r.sto.AppendEntriesFromIndex(logInsertIndex, args.Entries[newEntriesIndex:])
+			}
+
+			if args.LeaderCommit > r.sto.GetCommitIndex() {
+				ci := minIndex(args.LeaderCommit, uint32(len(r.sto.Entries())))
+				r.sto.SetCommitIndex(ci)
+				r.dlog("commitIndex变为 %d", ci)
+				// TODO
+			}
 		}
-		reply.Success = true
 	}
 
 	reply.Term = r.Term
 	r.dlog("AppendEntries应答: %+v", reply)
 	return reply, nil
+}
+
+func minIndex(x, y uint32) uint32 {
+	if x < y {
+		return x
+	}
+	return y
 }
