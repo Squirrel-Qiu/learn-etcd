@@ -19,6 +19,7 @@ type Server struct {
 	rpcServer *grpc.Server
 	listener  net.Listener
 
+	peerIds     []uint32
 	peerClients map[uint32]*grpc.ClientConn
 
 	ready <-chan struct{}
@@ -27,9 +28,10 @@ type Server struct {
 	wg sync.WaitGroup
 }
 
-func NewServer(serverId uint32, ready <-chan struct{}) *Server {
+func NewServer(serverId uint32, peerIds []uint32, ready <-chan struct{}) *Server {
 	s := &Server{
 		serverId:    serverId,
+		peerIds:     peerIds,
 		peerClients: make(map[uint32]*grpc.ClientConn),
 		ready:       ready,
 		quit:        make(chan struct{}),
@@ -39,7 +41,7 @@ func NewServer(serverId uint32, ready <-chan struct{}) *Server {
 
 func (s *Server) Serve() {
 	s.mu.Lock()
-	s.r = newRaft(s.serverId, s.peerClients, s, s.ready)
+	s.r = newRaft(s.serverId, s.peerIds, s.peerClients, s, s.ready)
 
 	s.rpcServer = grpc.NewServer()
 	pb.RegisterRaftServer(s.rpcServer, s.r)

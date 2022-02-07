@@ -35,14 +35,14 @@ func NewHarness(t *testing.T, n int) *Harness {
 	// Create all Servers in this cluster, assign ids and peer ids.
 	// 创建集群中的所有机器，分配ID和同伴ID
 	for i := 1; i <= n; i++ {
-		//peerIds := make([]uint32, 0)
-		//for p := 1; p <= n; p++ {
-		//	if p != i {
-		//		peerIds = append(peerIds, uint32(p))
-		//	}
-		//}
+		peerIds := make([]uint32, 0)
+		for p := 1; p <= n; p++ {
+			if p != i {
+				peerIds = append(peerIds, uint32(p))
+			}
+		}
 
-		ns[i] = NewServer(uint32(i), ready)
+		ns[i] = NewServer(uint32(i), peerIds, ready)
 		ns[i].Serve()
 	}
 

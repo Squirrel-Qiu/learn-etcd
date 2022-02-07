@@ -34,6 +34,7 @@ type raft struct {
 	Term        uint32
 	VotedFor    uint32
 	peerClients map[uint32]*grpc.ClientConn
+	peerIds []uint32
 
 	server *Server
 
@@ -46,10 +47,11 @@ type raft struct {
 	matchIndex map[uint32]uint32
 }
 
-func newRaft(id uint32, peerClients map[uint32]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
+func newRaft(id uint32, peerIds []uint32, peerClients map[uint32]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
 	r := &raft{
 		id:               id,
 		state:            StateFollower,
+		peerIds:          peerIds,
 		peerClients:      peerClients,
 		VotedFor:         None,
 		server:           server,
@@ -153,13 +155,19 @@ func (r *raft) startElection() {
 
 	var votesReceived uint32
 
-	for i := range r.peerClients {
+	for _, id := range r.peerIds {
 		go func(peerId uint32) {
+			r.mu.Lock()
+			lastLogIndex, lastLogTerm := r.lastLogIndexAndTerm()
+			r.mu.Unlock()
+			
 			args := &pb.RequestVoteArgs{
-				Term:        currentTerm,
-				CandidateId: r.id,
+				Term:         currentTerm,
+				CandidateId:  r.id,
+				LastLogIndex: lastLogIndex,
+				LastLogTerm:  lastLogTerm,
 			}
-			r.dlog("向服务器 %d 发送RequestVote请求", peerId)
+			r.dlog("向服务器 %d 发送RequestVote请求: %+v", peerId, args)
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
 			defer cancelFunc()
@@ -181,7 +189,7 @@ func (r *raft) startElection() {
 				} else if reply.Term == currentTerm {
 					if reply.VoteGranted {
 						votes := int(atomic.AddUint32(&votesReceived, 1))
-						if votes > (len(r.peerClients)+1)/2 {
+						if votes > (len(r.peerIds)+1)/2 {
 							r.dlog("以 %d 票数当选Leader", votes)
 							r.becomeLeader()
 							return
@@ -189,7 +197,7 @@ func (r *raft) startElection() {
 					}
 				}
 			}
-		}(i)
+		}(id)
 	}
 
 	// 给peerIds发送完RequestVote后开启定时器
@@ -205,7 +213,11 @@ func (r *raft) becomeFollower(term uint32) {
 
 func (r *raft) becomeLeader() {
 	r.state = StateLeader
-	r.dlog("成为Leader, term=%d", r.Term)
+
+	for _, peerId := range r.peerIds {
+		r.nextIndex[peerId] = uint32(len(r.sto.Entries()))
+	}
+	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v, logs=%v", r.Term, r.nextIndex, r.matchIndex, r.sto.Entries())
 
 	go func() {
 		ticker := time.NewTicker(r.heartbeatTimeout)
@@ -231,7 +243,7 @@ func (r *raft) sendHeartbeats() {
 	currentTerm := r.Term
 	r.mu.Unlock()
 
-	for i := range r.peerClients {
+	for _, id := range r.peerIds {
 		go func(peerId uint32) {
 			r.mu.Lock()
 
@@ -283,12 +295,12 @@ func (r *raft) sendHeartbeats() {
 						for i := leaderCommit + 1; i < uint32(len(logs)); i++ {
 							if logs[i].Term == currentTerm {
 								matchCount := 1
-								for p := range r.peerClients {
+								for _, p := range r.peerIds {
 									if r.matchIndex[p] >= i {
 										matchCount++
 									}
 								}
-								if matchCount > (len(r.peerClients)+1)/2 {
+								if matchCount > (len(r.peerIds)+1)/2 {
 									r.sto.SetCommitIndex(i)
 								}
 							}
@@ -305,7 +317,7 @@ func (r *raft) sendHeartbeats() {
 					}
 				}
 			}
-		}(i)
+		}(id)
 	}
 }
 
