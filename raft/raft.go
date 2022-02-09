@@ -25,16 +25,32 @@ const (
 	Dead
 )
 
+func (t StateType) String() string {
+	switch t {
+	case StateFollower:
+		return "Follower"
+	case StateCandidate:
+		return "Candidate"
+	case StateLeader:
+		return "Leader"
+	case Dead:
+		return "Dead"
+	default:
+		panic("illegal state")
+	}
+}
+
 type raft struct {
 	mu sync.Mutex
 
 	id    uint32
 	state StateType
 
-	Term        uint32
-	VotedFor    uint32
+	Term     uint32
+	VotedFor uint32
+
+	peerIds     []uint32
 	peerClients map[uint32]*grpc.ClientConn
-	peerIds []uint32
 
 	server *Server
 
@@ -55,7 +71,10 @@ func newRaft(id uint32, peerIds []uint32, peerClients map[uint32]*grpc.ClientCon
 		peerClients:      peerClients,
 		VotedFor:         None,
 		server:           server,
+		sto:              storage.NewMemoryStorage(),
 		heartbeatTimeout: 30 * time.Millisecond,
+		nextIndex:        make(map[uint32]uint32),
+		matchIndex:       make(map[uint32]uint32),
 	}
 
 	go func() {
@@ -153,14 +172,14 @@ func (r *raft) startElection() {
 	r.electionResetEvent = time.Now()
 	r.dlog("成为候选人 term=%d , 开始发起选举运动", currentTerm)
 
-	var votesReceived uint32
+	var votesReceived uint32 = 1
 
 	for _, id := range r.peerIds {
 		go func(peerId uint32) {
 			r.mu.Lock()
 			lastLogIndex, lastLogTerm := r.lastLogIndexAndTerm()
 			r.mu.Unlock()
-			
+
 			args := &pb.RequestVoteArgs{
 				Term:         currentTerm,
 				CandidateId:  r.id,
@@ -323,7 +342,7 @@ func (r *raft) sendHeartbeats() {
 
 func (r *raft) lastLogIndexAndTerm() (uint32, uint32) {
 	n := len(r.sto.Entries())
-	if n > 0 {
+	if n > 1 {
 		lastLogIndex := uint32(n - 1)
 		return lastLogIndex, r.sto.Entries()[lastLogIndex].Term
 	}
@@ -439,4 +458,16 @@ func minIndex(x, y uint32) uint32 {
 		return x
 	}
 	return y
+}
+
+func (r *raft) SubmitOne(data []byte) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.dlog("收到添加指令: %s", data)
+	if r.state == StateLeader {
+		r.sto.AppendEntry(&pb.Entry{Term: r.Term, Data: data})
+		return true
+	}
+	return false
 }

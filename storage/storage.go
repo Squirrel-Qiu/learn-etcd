@@ -7,6 +7,7 @@ import (
 
 type Storage interface{
 	Entries() []*pb.Entry
+	AppendEntry(entry *pb.Entry)
 	AppendEntriesFromIndex(x uint32, newEntries []*pb.Entry)
 	GetCommitIndex() uint32
 	SetCommitIndex(commitIndex uint32)
@@ -27,10 +28,13 @@ func NewMemoryStorage() *MemoryStorage {
 }
 
 func (s *MemoryStorage) Entries() []*pb.Entry {
-	if s.commitIndex > 0 {
-		return s.ents
-	}
-	return nil
+	//if s.commitIndex > 0 {
+	//}
+	return s.ents
+}
+
+func (s *MemoryStorage) AppendEntry(entry *pb.Entry) {
+	s.ents = append(s.ents, entry)
 }
 
 func (s *MemoryStorage) AppendEntriesFromIndex(x uint32, newEntries []*pb.Entry) {

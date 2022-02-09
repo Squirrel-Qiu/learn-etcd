@@ -106,3 +106,7 @@ func (h *Harness) Shutdown() {
 		h.cluster[i].Shutdown()
 	}
 }
+
+func (h *Harness) SubmitToServer(serverId uint32, data []byte) bool {
+	return h.cluster[serverId].r.SubmitOne(data)
+}
