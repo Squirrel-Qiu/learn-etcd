@@ -6,45 +6,79 @@ import (
 )
 
 type Storage interface{
-	Entries() []*pb.Entry
+	GetEntries() []*pb.Entry
 	AppendEntry(entry *pb.Entry)
-	AppendEntriesFromIndex(x uint32, newEntries []*pb.Entry)
-	GetCommitIndex() uint32
-	SetCommitIndex(commitIndex uint32)
+	AppendEntriesFromIndex(x uint64, newEntries []*pb.Entry)
+
+	GetCommitIndex() uint64
+	SetCommitIndex(commitIndex uint64)
+
+	GetLastLogIndex() uint64
+	GetLastLogTerm() uint64
 }
 
 type MemoryStorage struct {
 	sync.Mutex
 
-	commitIndex uint32
-	lastApplied uint32
+	commitIndex uint64
+	lastApplied uint64
 	ents        []*pb.Entry
 }
 
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
-		ents: make([]*pb.Entry, 1),
+		ents: make([]*pb.Entry, 0),
 	}
 }
 
-func (s *MemoryStorage) Entries() []*pb.Entry {
+func (s *MemoryStorage) GetEntries() []*pb.Entry {
 	//if s.commitIndex > 0 {
 	//}
+	s.Lock()
+	defer s.Unlock()
 	return s.ents
 }
 
 func (s *MemoryStorage) AppendEntry(entry *pb.Entry) {
+	s.Lock()
+	defer s.Unlock()
 	s.ents = append(s.ents, entry)
 }
 
-func (s *MemoryStorage) AppendEntriesFromIndex(x uint32, newEntries []*pb.Entry) {
+func (s *MemoryStorage) AppendEntriesFromIndex(x uint64, newEntries []*pb.Entry) {
+	s.Lock()
+	defer s.Unlock()
 	s.ents = append(s.ents[:x], newEntries...)
 }
 
-func (s *MemoryStorage) GetCommitIndex() uint32 {
+func (s *MemoryStorage) GetCommitIndex() uint64 {
+	s.Lock()
+	defer s.Unlock()
 	return s.commitIndex
 }
 
-func (s *MemoryStorage) SetCommitIndex(commitIndex uint32) {
+func (s *MemoryStorage) SetCommitIndex(commitIndex uint64) {
+	s.Lock()
+	defer s.Unlock()
 	s.commitIndex = commitIndex
+}
+
+func (s *MemoryStorage) GetLastLogIndex() uint64 {
+	s.Lock()
+	defer s.Unlock()
+
+	if len(s.ents) == 0 {
+		return 0
+	}
+	return s.ents[len(s.ents)-1].Index
+}
+
+func (s *MemoryStorage) GetLastLogTerm() uint64 {
+	s.Lock()
+	defer s.Unlock()
+
+	if len(s.ents) == 0 {
+		return 0
+	}
+	return s.ents[len(s.ents)-1].Term
 }

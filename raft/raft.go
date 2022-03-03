@@ -14,7 +14,7 @@ import (
 )
 
 const DeLog = 1
-const None uint32 = 0
+const None uint64 = 0
 
 type StateType int
 
@@ -43,14 +43,14 @@ func (t StateType) String() string {
 type raft struct {
 	mu sync.Mutex
 
-	id    uint32
+	id    uint64
 	state StateType
 
-	Term     uint32
-	VotedFor uint32
+	Term     uint64
+	VotedFor uint64
 
-	peerIds     []uint32
-	peerClients map[uint32]*grpc.ClientConn
+	peerIds     []uint64
+	peerClients map[uint64]*grpc.ClientConn
 
 	server *Server
 
@@ -59,11 +59,11 @@ type raft struct {
 	heartbeatTimeout   time.Duration
 	electionResetEvent time.Time
 
-	nextIndex  map[uint32]uint32
-	matchIndex map[uint32]uint32
+	nextIndex  map[uint64]uint64
+	matchIndex map[uint64]uint64
 }
 
-func newRaft(id uint32, peerIds []uint32, peerClients map[uint32]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
+func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
 	r := &raft{
 		id:               id,
 		state:            StateFollower,
@@ -73,8 +73,8 @@ func newRaft(id uint32, peerIds []uint32, peerClients map[uint32]*grpc.ClientCon
 		server:           server,
 		sto:              storage.NewMemoryStorage(),
 		heartbeatTimeout: 30 * time.Millisecond,
-		nextIndex:        make(map[uint32]uint32),
-		matchIndex:       make(map[uint32]uint32),
+		nextIndex:        make(map[uint64]uint64),
+		matchIndex:       make(map[uint64]uint64),
 	}
 
 	go func() {
@@ -88,7 +88,7 @@ func newRaft(id uint32, peerIds []uint32, peerClients map[uint32]*grpc.ClientCon
 	return r
 }
 
-func (r *raft) Report() (id uint32, term uint32, isLeader bool) {
+func (r *raft) Report() (id uint64, term uint64, isLeader bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.id, r.Term, r.state == StateLeader
@@ -172,12 +172,12 @@ func (r *raft) startElection() {
 	r.electionResetEvent = time.Now()
 	r.dlog("成为候选人 term=%d , 开始发起选举运动", currentTerm)
 
-	var votesReceived uint32 = 1
+	var votesReceived uint64 = 1
 
 	for _, id := range r.peerIds {
-		go func(peerId uint32) {
+		go func(peerId uint64) {
 			r.mu.Lock()
-			lastLogIndex, lastLogTerm := r.lastLogIndexAndTerm()
+			lastLogIndex, lastLogTerm := r.sto.GetLastLogIndex(), r.sto.GetLastLogTerm()
 			r.mu.Unlock()
 
 			args := &pb.RequestVoteArgs{
@@ -207,7 +207,7 @@ func (r *raft) startElection() {
 					return
 				} else if reply.Term == currentTerm {
 					if reply.VoteGranted {
-						votes := int(atomic.AddUint32(&votesReceived, 1))
+						votes := int(atomic.AddUint64(&votesReceived, 1))
 						if votes > (len(r.peerIds)+1)/2 {
 							r.dlog("以 %d 票数当选Leader", votes)
 							r.becomeLeader()
@@ -223,7 +223,7 @@ func (r *raft) startElection() {
 	go r.runElectionTimeout()
 }
 
-func (r *raft) becomeFollower(term uint32) {
+func (r *raft) becomeFollower(term uint64) {
 	r.state = StateFollower
 	r.Term = term
 	r.VotedFor = None
@@ -234,9 +234,9 @@ func (r *raft) becomeLeader() {
 	r.state = StateLeader
 
 	for _, peerId := range r.peerIds {
-		r.nextIndex[peerId] = uint32(len(r.sto.Entries()))
+		r.nextIndex[peerId] = r.sto.GetLastLogIndex() + 1
 	}
-	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v, logs=%v", r.Term, r.nextIndex, r.matchIndex, r.sto.Entries())
+	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v, logs=%v", r.Term, r.nextIndex, r.matchIndex, r.sto.GetEntries())
 
 	go func() {
 		ticker := time.NewTicker(r.heartbeatTimeout)
@@ -263,18 +263,26 @@ func (r *raft) sendHeartbeats() {
 	r.mu.Unlock()
 
 	for _, id := range r.peerIds {
-		go func(peerId uint32) {
+		go func(peerId uint64) {
 			r.mu.Lock()
 
-			logs := r.sto.Entries()
+			logs := r.sto.GetEntries()
 			x := r.nextIndex[peerId]
 			preLogIndex := x - 1
-			preLogTerm := uint32(0)
-			if preLogIndex > 0 {
-				preLogTerm = logs[preLogIndex].Term
+
+			// entries起始位置条目的 Index
+			var firstIndex, preLogTerm uint64
+			var entries []*pb.Entry
+			if len(logs) != 0 {
+				if preLogIndex == 0 {
+					preLogIndex = r.sto.GetLastLogIndex()
+				}
+				firstIndex = logs[0].Index
+				fmt.Println(r.sto.GetLastLogIndex(), preLogIndex, firstIndex, "1234567")
+				preLogTerm = logs[preLogIndex-firstIndex].Term
+				entries = logs[preLogIndex-firstIndex:]
 			}
 
-			entries := logs[x:]
 			leaderCommit := r.sto.GetCommitIndex()
 
 			args := &pb.AppendEntriesArgs{
@@ -306,12 +314,12 @@ func (r *raft) sendHeartbeats() {
 
 				if r.state == StateLeader && currentTerm == reply.Term {
 					if reply.Success {
-						r.nextIndex[peerId] = x + uint32(len(entries))
+						r.nextIndex[peerId] = x + uint64(len(entries))
 						r.matchIndex[peerId] = r.nextIndex[peerId] - 1
 						r.dlog("收到 %d AppendEntries添加成功的响应: nextIndex= %v, matchIndex= %v", peerId, r.nextIndex[peerId], r.matchIndex[peerId])
 
 						// 检查是否有可提交的指令
-						for i := leaderCommit + 1; i < uint32(len(logs)); i++ {
+						for i := leaderCommit + 1; i < uint64(len(logs)); i++ {
 							if logs[i].Term == currentTerm {
 								matchCount := 1
 								for _, p := range r.peerIds {
@@ -340,15 +348,6 @@ func (r *raft) sendHeartbeats() {
 	}
 }
 
-func (r *raft) lastLogIndexAndTerm() (uint32, uint32) {
-	n := len(r.sto.Entries())
-	if n > 1 {
-		lastLogIndex := uint32(n - 1)
-		return lastLogIndex, r.sto.Entries()[lastLogIndex].Term
-	}
-	return 0, 0
-}
-
 func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply *pb.RequestVoteReply, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -362,7 +361,7 @@ func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply
 		r.becomeFollower(args.Term)
 	}
 
-	lastLogIndex, lastLogTerm := r.lastLogIndexAndTerm()
+	lastLogIndex, lastLogTerm := r.sto.GetLastLogIndex(), r.sto.GetLastLogTerm()
 
 	reply = &pb.RequestVoteReply{
 		Term:        0,
@@ -411,40 +410,54 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 		}
 		r.electionResetEvent = time.Now()
 
-		logs := r.sto.Entries()
-		// 检查本地日志在索引PreLogIndex处的任期是否与PreLogTerm匹配
-		if args.PreLogIndex == 0 || (args.PreLogIndex < uint32(len(logs)) && args.PreLogTerm == logs[args.PreLogIndex].Term) {
+		logs := r.sto.GetEntries()
+		//firstIndex := logs[0].Index
+		//position := args.PreLogIndex-firstIndex    // 对应位点 ???
+
+		// 检查本地日志在索引-PreLogIndex处的任期是否与PreLogTerm匹配
+		if args.PreLogIndex == 0 && len(logs) == 0 {
+			reply.Success = true
+			r.dlog("两节点都没有日志, 单纯维持心跳")
+		} else if args.PreLogIndex == 0 && len(logs) != 0 {
+			reply.Success = true
+			// Leader日志为空, Follower不为空服从为空
+			// TODO
+		} else if args.PreLogIndex != 0 && len(logs) == 0 {
+			reply.Success = true
+			r.dlog("从索引 %d 处开始插入以下日志 %v", 0, args.Entries)
+			r.sto.AppendEntriesFromIndex(0, args.Entries)
+		} else if position := args.PreLogIndex-logs[0].Index; position < uint64(len(logs)) && args.PreLogTerm == logs[position].Term {
 			reply.Success = true
 
 			// 寻找插入点
-			logInsertIndex := args.PreLogIndex + 1
-			newEntriesIndex := 0
+			logInsertPosition := position + 1
+			newEntriesIndex := 1
 
 			for {
-				if logInsertIndex >= uint32(len(logs)) || newEntriesIndex >= len(args.Entries) {
+				if logInsertPosition >= uint64(len(logs)) || newEntriesIndex >= len(args.Entries) {
 					break
 				}
-				if logs[logInsertIndex].Term != args.Entries[newEntriesIndex].Term {
+				if logs[logInsertPosition].Term != args.Entries[newEntriesIndex].Term {
 					break
 				}
-				logInsertIndex++
+				logInsertPosition++
 				newEntriesIndex++
 			}
 
 			// 循环结束时:
-			// - logInsertIndex指向本地日志结尾,或与Leader发送的日志(请求条目)之间存在冲突的索引位置
+			// - logInsertIndex指向本地日志结尾的下一位,或与Leader发送的日志(请求条目)之间存在冲突的索引位置的下一位
 			// - newEntriesIndex指向请求条目开始插入的索引位置
 			if newEntriesIndex < len(args.Entries) {
-				r.dlog("从索引 %d 处开始插入以下日志 %v", logInsertIndex, args.Entries[newEntriesIndex:])
-				r.sto.AppendEntriesFromIndex(logInsertIndex, args.Entries[newEntriesIndex:])
+				r.dlog("从索引 %d 处开始插入以下日志 %v", logInsertPosition, args.Entries[newEntriesIndex:])
+				r.sto.AppendEntriesFromIndex(logInsertPosition, args.Entries[newEntriesIndex:])
 			}
+		}
 
-			if args.LeaderCommit > r.sto.GetCommitIndex() {
-				ci := minIndex(args.LeaderCommit, uint32(len(r.sto.Entries())))
-				r.sto.SetCommitIndex(ci)
-				r.dlog("commitIndex变为 %d", ci)
-				// TODO
-			}
+		if args.LeaderCommit > r.sto.GetCommitIndex() {
+			ci := minIndex(args.LeaderCommit, uint64(len(r.sto.GetEntries())))
+			r.sto.SetCommitIndex(ci)
+			r.dlog("commitIndex变为 %d", ci)
+			// TODO
 		}
 	}
 
@@ -453,7 +466,7 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 	return reply, nil
 }
 
-func minIndex(x, y uint32) uint32 {
+func minIndex(x, y uint64) uint64 {
 	if x < y {
 		return x
 	}
@@ -466,7 +479,8 @@ func (r *raft) SubmitOne(data []byte) bool {
 
 	r.dlog("收到添加指令: %s", data)
 	if r.state == StateLeader {
-		r.sto.AppendEntry(&pb.Entry{Term: r.Term, Data: data})
+		x := r.sto.GetLastLogIndex()
+		r.sto.AppendEntry(&pb.Entry{Index: x+1, Term: r.Term, Data: data})
 		return true
 	}
 	return false

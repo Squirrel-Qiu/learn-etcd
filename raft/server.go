@@ -11,16 +11,16 @@ import (
 type Server struct {
 	mu sync.Mutex
 
-	serverId uint32
-	//peerIds  []uint32
+	serverId uint64
+	//peerIds  []uint64
 
 	r *raft
 
 	rpcServer *grpc.Server
 	listener  net.Listener
 
-	peerIds     []uint32
-	peerClients map[uint32]*grpc.ClientConn
+	peerIds     []uint64
+	peerClients map[uint64]*grpc.ClientConn
 
 	ready <-chan struct{}
 	quit  chan struct{}
@@ -28,11 +28,11 @@ type Server struct {
 	wg sync.WaitGroup
 }
 
-func NewServer(serverId uint32, peerIds []uint32, ready <-chan struct{}) *Server {
+func NewServer(serverId uint64, peerIds []uint64, ready <-chan struct{}) *Server {
 	s := &Server{
 		serverId:    serverId,
 		peerIds:     peerIds,
-		peerClients: make(map[uint32]*grpc.ClientConn),
+		peerClients: make(map[uint64]*grpc.ClientConn),
 		ready:       ready,
 		quit:        make(chan struct{}),
 	}
@@ -84,7 +84,7 @@ func (s *Server) Serve() {
 	}()
 }
 
-func (s *Server) ConnectToPeer(peerId uint32, addr net.Addr) error {
+func (s *Server) ConnectToPeer(peerId uint64, addr net.Addr) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.peerClients[peerId] == nil {

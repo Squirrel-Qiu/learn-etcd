@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
 	"log"
 	"math/rand"
 	"testing"
@@ -35,14 +36,14 @@ func NewHarness(t *testing.T, n int) *Harness {
 	// Create all Servers in this cluster, assign ids and peer ids.
 	// 创建集群中的所有机器，分配ID和同伴ID
 	for i := 1; i <= n; i++ {
-		peerIds := make([]uint32, 0)
+		peerIds := make([]uint64, 0)
 		for p := 1; p <= n; p++ {
 			if p != i {
-				peerIds = append(peerIds, uint32(p))
+				peerIds = append(peerIds, uint64(p))
 			}
 		}
 
-		ns[i] = NewServer(uint32(i), peerIds, ready)
+		ns[i] = NewServer(uint64(i), peerIds, ready)
 		ns[i].Serve()
 	}
 
@@ -51,7 +52,7 @@ func NewHarness(t *testing.T, n int) *Harness {
 	for i := 1; i <= n; i++ {
 		for j := 1; j <= n; j++ {
 			if i != j {
-				ns[i].ConnectToPeer(uint32(j), ns[j].GetListenAddr())
+				ns[i].ConnectToPeer(uint64(j), ns[j].GetListenAddr())
 			}
 		}
 		connected[i] = true
@@ -69,7 +70,7 @@ func NewHarness(t *testing.T, n int) *Harness {
 // CheckSingleLeader checks that only a single server thinks it's the leader.
 // Returns the leader's id and term. It retries several times if no leader is
 // identified yet.
-func (h *Harness) CheckSingleLeader() (leaderId uint32, leaderTerm uint32) {
+func (h *Harness) CheckSingleLeader() (leaderId uint64, leaderTerm uint64) {
 	for r := 1; r <= 5; r++ {
 		//leaderTerm := 0
 		for i := 1; i <= h.n; i++ {
@@ -77,7 +78,7 @@ func (h *Harness) CheckSingleLeader() (leaderId uint32, leaderTerm uint32) {
 				id, term, isLeader := h.cluster[i].r.Report()
 				if isLeader {
 					if id > 0 {
-						leaderId = uint32(i)
+						leaderId = uint64(i)
 						leaderTerm = term
 					} else {
 						h.t.Fatalf("both %d and %d think they're leaders", leaderId, i)
@@ -107,6 +108,11 @@ func (h *Harness) Shutdown() {
 	}
 }
 
-func (h *Harness) SubmitToServer(serverId uint32, data []byte) bool {
+func (h *Harness) SubmitToServer(serverId uint64, data []byte) bool {
 	return h.cluster[serverId].r.SubmitOne(data)
+}
+
+func (h *Harness) GetLeaderEntries(leaderId uint64) []*raftpb.Entry {
+	ents := h.cluster[leaderId].r.sto.GetEntries()
+	return ents
 }
