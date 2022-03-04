@@ -234,7 +234,7 @@ func (r *raft) becomeLeader() {
 	r.state = StateLeader
 
 	for _, peerId := range r.peerIds {
-		r.nextIndex[peerId] = r.sto.GetLastLogIndex() + 1
+		r.nextIndex[peerId] = uint64(len(r.sto.GetEntries()) + 1)
 	}
 	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v, logs=%v", r.Term, r.nextIndex, r.matchIndex, r.sto.GetEntries())
 
@@ -269,18 +269,14 @@ func (r *raft) sendHeartbeats() {
 			logs := r.sto.GetEntries()
 			x := r.nextIndex[peerId]
 			preLogIndex := x - 1
-
-			// entries起始位置条目的 Index
-			var firstIndex, preLogTerm uint64
+			var preLogTerm uint64
 			var entries []*pb.Entry
-			if len(logs) != 0 {
-				if preLogIndex == 0 {
-					preLogIndex = r.sto.GetLastLogIndex()
-				}
-				firstIndex = logs[0].Index
-				fmt.Println(r.sto.GetLastLogIndex(), preLogIndex, firstIndex, "1234567")
-				preLogTerm = logs[preLogIndex-firstIndex].Term
-				entries = logs[preLogIndex-firstIndex:]
+			if preLogIndex > 0 && preLogIndex <= uint64(len(logs)) {
+				preLogTerm = logs[preLogIndex-1].Term
+				entries = logs[preLogIndex:]
+			} else if preLogIndex == 0 && len(logs) != 0 {
+				//preLogTerm = logs[preLogIndex].Term
+				entries = logs[preLogIndex:]
 			}
 
 			leaderCommit := r.sto.GetCommitIndex()
@@ -296,7 +292,7 @@ func (r *raft) sendHeartbeats() {
 
 			r.mu.Unlock()
 
-			r.dlog("向服务器 %d 发送AppendEntries请求", peerId)
+			r.dlog("向服务器 %d 发送AppendEntries请求, 现日志条目长度为 %d", peerId, len(logs))
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
 			defer cancelFunc()
@@ -319,9 +315,9 @@ func (r *raft) sendHeartbeats() {
 						r.dlog("收到 %d AppendEntries添加成功的响应: nextIndex= %v, matchIndex= %v", peerId, r.nextIndex[peerId], r.matchIndex[peerId])
 
 						// 检查是否有可提交的指令
-						for i := leaderCommit + 1; i < uint64(len(logs)); i++ {
-							if logs[i].Term == currentTerm {
-								matchCount := 1
+						for i := leaderCommit + 1; i <= uint64(len(logs)); i++ {
+							if logs[i-1].Term == currentTerm {
+								matchCount := 1    // Leader自己的
 								for _, p := range r.peerIds {
 									if r.matchIndex[p] >= i {
 										matchCount++
@@ -411,13 +407,11 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 		r.electionResetEvent = time.Now()
 
 		logs := r.sto.GetEntries()
-		//firstIndex := logs[0].Index
-		//position := args.PreLogIndex-firstIndex    // 对应位点 ???
 
 		// 检查本地日志在索引-PreLogIndex处的任期是否与PreLogTerm匹配
-		if args.PreLogIndex == 0 && len(logs) == 0 {
+		if len(args.Entries) == 0 {
 			reply.Success = true
-			r.dlog("两节点都没有日志, 单纯维持心跳")
+			r.dlog("没有日志要添加, 单纯维持心跳")
 		} else if args.PreLogIndex == 0 && len(logs) != 0 {
 			reply.Success = true
 			// Leader日志为空, Follower不为空服从为空
@@ -426,12 +420,12 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 			reply.Success = true
 			r.dlog("从索引 %d 处开始插入以下日志 %v", 0, args.Entries)
 			r.sto.AppendEntriesFromIndex(0, args.Entries)
-		} else if position := args.PreLogIndex-logs[0].Index; position < uint64(len(logs)) && args.PreLogTerm == logs[position].Term {
+		} else if args.PreLogIndex == 0 || args.PreLogIndex <= uint64(len(logs)) && args.PreLogTerm == logs[args.PreLogIndex-1].Term {
 			reply.Success = true
 
 			// 寻找插入点
-			logInsertPosition := position + 1
-			newEntriesIndex := 1
+			logInsertPosition := args.PreLogIndex
+			newEntriesIndex := 0
 
 			for {
 				if logInsertPosition >= uint64(len(logs)) || newEntriesIndex >= len(args.Entries) {

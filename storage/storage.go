@@ -34,39 +34,26 @@ func NewMemoryStorage() *MemoryStorage {
 func (s *MemoryStorage) GetEntries() []*pb.Entry {
 	//if s.commitIndex > 0 {
 	//}
-	s.Lock()
-	defer s.Unlock()
 	return s.ents
 }
 
 func (s *MemoryStorage) AppendEntry(entry *pb.Entry) {
-	s.Lock()
-	defer s.Unlock()
 	s.ents = append(s.ents, entry)
 }
 
 func (s *MemoryStorage) AppendEntriesFromIndex(x uint64, newEntries []*pb.Entry) {
-	s.Lock()
-	defer s.Unlock()
 	s.ents = append(s.ents[:x], newEntries...)
 }
 
 func (s *MemoryStorage) GetCommitIndex() uint64 {
-	s.Lock()
-	defer s.Unlock()
 	return s.commitIndex
 }
 
 func (s *MemoryStorage) SetCommitIndex(commitIndex uint64) {
-	s.Lock()
-	defer s.Unlock()
 	s.commitIndex = commitIndex
 }
 
 func (s *MemoryStorage) GetLastLogIndex() uint64 {
-	s.Lock()
-	defer s.Unlock()
-
 	if len(s.ents) == 0 {
 		return 0
 	}
@@ -74,9 +61,6 @@ func (s *MemoryStorage) GetLastLogIndex() uint64 {
 }
 
 func (s *MemoryStorage) GetLastLogTerm() uint64 {
-	s.Lock()
-	defer s.Unlock()
-
 	if len(s.ents) == 0 {
 		return 0
 	}
