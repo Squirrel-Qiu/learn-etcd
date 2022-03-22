@@ -21,10 +21,15 @@ message RequestVoteReply{
   bool VoteGranted = 2;
 }
 
+message Data {
+  bytes Key = 1;
+  bytes Value = 2;
+}
+
 message Entry {
   uint64 Index = 1;
   uint64 Term = 2;
-  bytes Data = 3;
+  repeated Data data = 3;
 }
 
 message AppendEntriesArgs {

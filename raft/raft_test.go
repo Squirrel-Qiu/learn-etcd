@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
 	"log"
 	"testing"
 	"time"
@@ -11,10 +12,10 @@ func TestElectionBasic(t *testing.T) {
 	defer h.Shutdown()
 
 	leaderId, _ := h.CheckSingleLeader()
-	h.SubmitToServer(leaderId, []byte("squirrel-jiu"))
-	h.SubmitToServer(leaderId, []byte("I'm a machine"))
+	h.SubmitToServer(leaderId, []*raftpb.Data{{Key: []byte("squ"), Value: []byte("squirrel-qiu")}, {}})
+	h.SubmitToServer(leaderId, []*raftpb.Data{{Key: []byte("machine"), Value: []byte("I'm a machine")}, {}})
 	time.Sleep(150 * time.Millisecond)
-	h.SubmitToServer(leaderId, []byte("This is a computer"))
+	h.SubmitToServer(leaderId, []*raftpb.Data{{Key: []byte("computer"), Value: []byte("This is a computer")}, {}})
 	time.Sleep(150 * time.Millisecond)
 	ents := h.GetLeaderEntries(leaderId)
 	log.Println(ents, 6666)

@@ -108,7 +108,7 @@ func (h *Harness) Shutdown() {
 	}
 }
 
-func (h *Harness) SubmitToServer(serverId uint64, data []byte) bool {
+func (h *Harness) SubmitToServer(serverId uint64, data []*raftpb.Data) bool {
 	return h.cluster[serverId].r.SubmitOne(data)
 }
 

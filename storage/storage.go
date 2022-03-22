@@ -5,9 +5,9 @@ import (
 	"sync"
 )
 
-type Storage interface{
+type LogStorage interface {
 	GetEntries() []*pb.Entry
-	AppendEntry(entry *pb.Entry)
+	AppendEntries(entry []*pb.Entry)
 	AppendEntriesFromIndex(x uint64, newEntries []*pb.Entry)
 
 	GetCommitIndex() uint64
@@ -37,8 +37,8 @@ func (s *MemoryStorage) GetEntries() []*pb.Entry {
 	return s.ents
 }
 
-func (s *MemoryStorage) AppendEntry(entry *pb.Entry) {
-	s.ents = append(s.ents, entry)
+func (s *MemoryStorage) AppendEntries(entry []*pb.Entry) {
+	s.ents = append(s.ents, entry...)
 }
 
 func (s *MemoryStorage) AppendEntriesFromIndex(x uint64, newEntries []*pb.Entry) {

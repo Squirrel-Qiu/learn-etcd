@@ -54,7 +54,7 @@ type raft struct {
 
 	server *Server
 
-	sto storage.Storage
+	sto storage.LogStorage
 
 	heartbeatTimeout   time.Duration
 	electionResetEvent time.Time
@@ -317,7 +317,7 @@ func (r *raft) sendHeartbeats() {
 						// 检查是否有可提交的指令
 						for i := leaderCommit + 1; i <= uint64(len(logs)); i++ {
 							if logs[i-1].Term == currentTerm {
-								matchCount := 1    // Leader自己的
+								matchCount := 1 // Leader自己的
 								for _, p := range r.peerIds {
 									if r.matchIndex[p] >= i {
 										matchCount++
@@ -467,14 +467,14 @@ func minIndex(x, y uint64) uint64 {
 	return y
 }
 
-func (r *raft) SubmitOne(data []byte) bool {
+func (r *raft) SubmitOne(data []*pb.Data) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.dlog("收到添加指令: %s", data)
 	if r.state == StateLeader {
 		x := r.sto.GetLastLogIndex()
-		r.sto.AppendEntry(&pb.Entry{Index: x+1, Term: r.Term, Data: data})
+		r.sto.AppendEntries([]*pb.Entry{{Index: x + 1, Term: r.Term, Data: data}})
 		return true
 	}
 	return false
