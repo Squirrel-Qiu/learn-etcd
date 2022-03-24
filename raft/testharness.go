@@ -108,11 +108,11 @@ func (h *Harness) Shutdown() {
 	}
 }
 
-func (h *Harness) SubmitToServer(serverId uint64, data []*raftpb.Data) bool {
-	return h.cluster[serverId].r.SubmitOne(data)
+func (h *Harness) SubmitToServer(serverId uint64, data []raftpb.Data) bool {
+	return h.cluster[serverId].r.UpdataData(data)
 }
 
 func (h *Harness) GetLeaderEntries(leaderId uint64) []*raftpb.Entry {
-	ents := h.cluster[leaderId].r.sto.GetEntries()
+	ents := h.cluster[leaderId].r.logSto.GetAllEntries()
 	return ents
 }

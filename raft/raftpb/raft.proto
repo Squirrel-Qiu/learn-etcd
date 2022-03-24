@@ -21,15 +21,21 @@ message RequestVoteReply{
   bool VoteGranted = 2;
 }
 
+enum MsgType {
+  MsgUpdate = 0;
+  MsgDelete = 1;
+}
+
 message Data {
-  bytes Key = 1;
-  bytes Value = 2;
+  bytes Key = 2;
+  bytes Value = 3;
 }
 
 message Entry {
   uint64 Index = 1;
   uint64 Term = 2;
-  repeated Data data = 3;
+  MsgType type = 3;
+  Data data = 4;
 }
 
 message AppendEntriesArgs {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	pb "github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
 	"github.com/Squirrel-Qiu/learn-etcd/storage"
+	bolt "go.etcd.io/bbolt"
 	"google.golang.org/grpc"
 	"log"
 	"math/rand"
@@ -24,6 +25,10 @@ const (
 	StateLeader
 	Dead
 )
+
+type Raft interface {
+	UpdateData(key, value []byte) bool
+}
 
 func (t StateType) String() string {
 	switch t {
@@ -54,7 +59,8 @@ type raft struct {
 
 	server *Server
 
-	sto storage.LogStorage
+	logSto storage.LogStorage
+	kvSto  storage.KVStorage
 
 	heartbeatTimeout   time.Duration
 	electionResetEvent time.Time
@@ -63,7 +69,16 @@ type raft struct {
 	matchIndex map[uint64]uint64
 }
 
+func initDB() *bolt.DB {
+	db, err := bolt.Open("/home/squirrel/git/learn-etcd/test.db", 0600, &bolt.Options{Timeout: 3 * time.Second})
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
+	return db
+}
+
 func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
+	db := initDB()
 	r := &raft{
 		id:               id,
 		state:            StateFollower,
@@ -71,7 +86,8 @@ func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]*grpc.ClientCon
 		peerClients:      peerClients,
 		VotedFor:         None,
 		server:           server,
-		sto:              storage.NewMemoryStorage(),
+		logSto:           storage.NewRaftLog(db),
+		kvSto:            storage.NewKVStorage(db),
 		heartbeatTimeout: 30 * time.Millisecond,
 		nextIndex:        make(map[uint64]uint64),
 		matchIndex:       make(map[uint64]uint64),
@@ -177,7 +193,7 @@ func (r *raft) startElection() {
 	for _, id := range r.peerIds {
 		go func(peerId uint64) {
 			r.mu.Lock()
-			lastLogIndex, lastLogTerm := r.sto.GetLastLogIndex(), r.sto.GetLastLogTerm()
+			lastLogIndex, lastLogTerm := r.logSto.GetLastLogIndex(), r.logSto.GetLastLogTerm()
 			r.mu.Unlock()
 
 			args := &pb.RequestVoteArgs{
@@ -234,9 +250,9 @@ func (r *raft) becomeLeader() {
 	r.state = StateLeader
 
 	for _, peerId := range r.peerIds {
-		r.nextIndex[peerId] = uint64(len(r.sto.GetEntries()) + 1)
+		r.nextIndex[peerId] = uint64(len(r.logSto.GetAllEntries()) + 1)
 	}
-	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v, logs=%v", r.Term, r.nextIndex, r.matchIndex, r.sto.GetEntries())
+	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v", r.Term, r.nextIndex, r.matchIndex)
 
 	go func() {
 		ticker := time.NewTicker(r.heartbeatTimeout)
@@ -266,7 +282,7 @@ func (r *raft) sendHeartbeats() {
 		go func(peerId uint64) {
 			r.mu.Lock()
 
-			logs := r.sto.GetEntries()
+			logs := r.logSto.GetAllEntries()
 			x := r.nextIndex[peerId]
 			preLogIndex := x - 1
 			var preLogTerm uint64
@@ -279,7 +295,7 @@ func (r *raft) sendHeartbeats() {
 				entries = logs[preLogIndex:]
 			}
 
-			leaderCommit := r.sto.GetCommitIndex()
+			leaderCommit := r.logSto.GetCommitIndex()
 
 			args := &pb.AppendEntriesArgs{
 				Term:         currentTerm,
@@ -324,14 +340,14 @@ func (r *raft) sendHeartbeats() {
 									}
 								}
 								if matchCount > (len(r.peerIds)+1)/2 {
-									r.sto.SetCommitIndex(i)
+									r.logSto.SetCommitIndex(i)
 								}
 							}
 						}
 
 						// if ok commit
-						if r.sto.GetCommitIndex() != leaderCommit {
-							r.dlog("提交日志, Leader的commitIndex变为 %d", r.sto.GetCommitIndex())
+						if r.logSto.GetCommitIndex() != leaderCommit {
+							r.dlog("提交日志, Leader的commitIndex变为 %d", r.logSto.GetCommitIndex())
 							// TODO commit notify
 						}
 					} else {
@@ -357,7 +373,7 @@ func (r *raft) RequestVote(ctx context.Context, args *pb.RequestVoteArgs) (reply
 		r.becomeFollower(args.Term)
 	}
 
-	lastLogIndex, lastLogTerm := r.sto.GetLastLogIndex(), r.sto.GetLastLogTerm()
+	lastLogIndex, lastLogTerm := r.logSto.GetLastLogIndex(), r.logSto.GetLastLogTerm()
 
 	reply = &pb.RequestVoteReply{
 		Term:        0,
@@ -406,7 +422,7 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 		}
 		r.electionResetEvent = time.Now()
 
-		logs := r.sto.GetEntries()
+		logs := r.logSto.GetAllEntries()
 
 		// 检查本地日志在索引-PreLogIndex处的任期是否与PreLogTerm匹配
 		if len(args.Entries) == 0 {
@@ -419,7 +435,7 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 		} else if args.PreLogIndex != 0 && len(logs) == 0 {
 			reply.Success = true
 			r.dlog("从索引 %d 处开始插入以下日志 %v", 0, args.Entries)
-			r.sto.AppendEntriesFromIndex(0, args.Entries)
+			r.logSto.AppendEntriesFromIndex(0, args.Entries)
 		} else if args.PreLogIndex == 0 || args.PreLogIndex <= uint64(len(logs)) && args.PreLogTerm == logs[args.PreLogIndex-1].Term {
 			reply.Success = true
 
@@ -443,13 +459,13 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 			// - newEntriesIndex指向请求条目开始插入的索引位置
 			if newEntriesIndex < len(args.Entries) {
 				r.dlog("从索引 %d 处开始插入以下日志 %v", logInsertPosition, args.Entries[newEntriesIndex:])
-				r.sto.AppendEntriesFromIndex(logInsertPosition, args.Entries[newEntriesIndex:])
+				r.logSto.AppendEntriesFromIndex(logInsertPosition, args.Entries[newEntriesIndex:])
 			}
 		}
 
-		if args.LeaderCommit > r.sto.GetCommitIndex() {
-			ci := minIndex(args.LeaderCommit, uint64(len(r.sto.GetEntries())))
-			r.sto.SetCommitIndex(ci)
+		if args.LeaderCommit > r.logSto.GetCommitIndex() {
+			ci := minIndex(args.LeaderCommit, uint64(len(r.logSto.GetAllEntries())))
+			r.logSto.SetCommitIndex(ci)
 			r.dlog("commitIndex变为 %d", ci)
 			// TODO
 		}
@@ -467,14 +483,20 @@ func minIndex(x, y uint64) uint64 {
 	return y
 }
 
-func (r *raft) SubmitOne(data []*pb.Data) bool {
+func (r *raft) UpdateData(key, value []byte) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.dlog("收到添加指令: %s", data)
+	r.dlog("收到添加指令{Key:%s, Value:%s}", key, value)
 	if r.state == StateLeader {
-		x := r.sto.GetLastLogIndex()
-		r.sto.AppendEntries([]*pb.Entry{{Index: x + 1, Term: r.Term, Data: data}})
+		// add entry into logStorage before kvStorage
+		data := &pb.Data{Key: key, Value: value}
+		r.logSto.AppendEntry(&pb.Entry{
+			Term: r.Term,
+			Type: 0,
+			Data: data,
+		})
+		r.kvSto.Add(key, value)
 		return true
 	}
 	return false
