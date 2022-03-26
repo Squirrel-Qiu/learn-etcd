@@ -29,7 +29,7 @@ type KeyData struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Key [][]byte `protobuf:"bytes,1,rep,name=Key,proto3" json:"Key,omitempty"`
+	Key []byte `protobuf:"bytes,1,opt,name=Key,proto3" json:"Key,omitempty"`
 }
 
 func (x *KeyData) Reset() {
@@ -64,7 +64,7 @@ func (*KeyData) Descriptor() ([]byte, []int) {
 	return file_gate_gate_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *KeyData) GetKey() [][]byte {
+func (x *KeyData) GetKey() []byte {
 	if x != nil {
 		return x.Key
 	}
@@ -76,7 +76,7 @@ type ValueData struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Value [][]byte `protobuf:"bytes,1,rep,name=Value,proto3" json:"Value,omitempty"`
+	Value []byte `protobuf:"bytes,1,opt,name=Value,proto3" json:"Value,omitempty"`
 }
 
 func (x *ValueData) Reset() {
@@ -111,14 +111,14 @@ func (*ValueData) Descriptor() ([]byte, []int) {
 	return file_gate_gate_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ValueData) GetValue() [][]byte {
+func (x *ValueData) GetValue() []byte {
 	if x != nil {
 		return x.Value
 	}
 	return nil
 }
 
-type DeleteResult struct {
+type Result struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -126,8 +126,8 @@ type DeleteResult struct {
 	Success bool `protobuf:"varint,1,opt,name=Success,proto3" json:"Success,omitempty"`
 }
 
-func (x *DeleteResult) Reset() {
-	*x = DeleteResult{}
+func (x *Result) Reset() {
+	*x = Result{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gate_gate_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -135,13 +135,13 @@ func (x *DeleteResult) Reset() {
 	}
 }
 
-func (x *DeleteResult) String() string {
+func (x *Result) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeleteResult) ProtoMessage() {}
+func (*Result) ProtoMessage() {}
 
-func (x *DeleteResult) ProtoReflect() protoreflect.Message {
+func (x *Result) ProtoReflect() protoreflect.Message {
 	mi := &file_gate_gate_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -153,12 +153,12 @@ func (x *DeleteResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeleteResult.ProtoReflect.Descriptor instead.
-func (*DeleteResult) Descriptor() ([]byte, []int) {
+// Deprecated: Use Result.ProtoReflect.Descriptor instead.
+func (*Result) Descriptor() ([]byte, []int) {
 	return file_gate_gate_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *DeleteResult) GetSuccess() bool {
+func (x *Result) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
@@ -220,81 +220,30 @@ func (x *Data) GetValue() []byte {
 	return nil
 }
 
-type UpdateResult struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Success bool `protobuf:"varint,1,opt,name=Success,proto3" json:"Success,omitempty"`
-}
-
-func (x *UpdateResult) Reset() {
-	*x = UpdateResult{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_gate_gate_proto_msgTypes[4]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *UpdateResult) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UpdateResult) ProtoMessage() {}
-
-func (x *UpdateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_gate_gate_proto_msgTypes[4]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UpdateResult.ProtoReflect.Descriptor instead.
-func (*UpdateResult) Descriptor() ([]byte, []int) {
-	return file_gate_gate_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *UpdateResult) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
 var File_gate_gate_proto protoreflect.FileDescriptor
 
 var file_gate_gate_proto_rawDesc = []byte{
 	0x0a, 0x0f, 0x67, 0x61, 0x74, 0x65, 0x2f, 0x67, 0x61, 0x74, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x12, 0x05, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22, 0x1b, 0x0a, 0x07, 0x4b, 0x65, 0x79, 0x44,
-	0x61, 0x74, 0x61, 0x12, 0x10, 0x0a, 0x03, 0x4b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0c,
+	0x61, 0x74, 0x61, 0x12, 0x10, 0x0a, 0x03, 0x4b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c,
 	0x52, 0x03, 0x4b, 0x65, 0x79, 0x22, 0x21, 0x0a, 0x09, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x44, 0x61,
-	0x74, 0x61, 0x12, 0x14, 0x0a, 0x05, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x01, 0x20, 0x03, 0x28,
-	0x0c, 0x52, 0x05, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x28, 0x0a, 0x0c, 0x44, 0x65, 0x6c, 0x65,
-	0x74, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x53, 0x75, 0x63, 0x63,
-	0x65, 0x73, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x07, 0x53, 0x75, 0x63, 0x63, 0x65,
-	0x73, 0x73, 0x22, 0x2e, 0x0a, 0x04, 0x44, 0x61, 0x74, 0x61, 0x12, 0x10, 0x0a, 0x03, 0x4b, 0x65,
-	0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x03, 0x4b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05,
-	0x56, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x56, 0x61, 0x6c,
-	0x75, 0x65, 0x22, 0x28, 0x0a, 0x0c, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x52, 0x65, 0x73, 0x75,
+	0x74, 0x61, 0x12, 0x14, 0x0a, 0x05, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0c, 0x52, 0x05, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x22, 0x0a, 0x06, 0x52, 0x65, 0x73, 0x75,
 	0x6c, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x18, 0x01, 0x20,
-	0x01, 0x28, 0x08, 0x52, 0x07, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x32, 0x9c, 0x01, 0x0a,
+	0x01, 0x28, 0x08, 0x52, 0x07, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x22, 0x2e, 0x0a, 0x04,
+	0x44, 0x61, 0x74, 0x61, 0x12, 0x10, 0x0a, 0x03, 0x4b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0c, 0x52, 0x03, 0x4b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x32, 0x90, 0x01, 0x0a,
 	0x04, 0x47, 0x61, 0x74, 0x65, 0x12, 0x2d, 0x0a, 0x07, 0x47, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61,
 	0x12, 0x0e, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x4b, 0x65, 0x79, 0x44, 0x61, 0x74, 0x61,
 	0x1a, 0x10, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x44, 0x61,
-	0x74, 0x61, 0x22, 0x00, 0x12, 0x33, 0x0a, 0x0a, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x44, 0x61,
+	0x74, 0x61, 0x22, 0x00, 0x12, 0x2d, 0x0a, 0x0a, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x44, 0x61,
 	0x74, 0x61, 0x12, 0x0e, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x4b, 0x65, 0x79, 0x44, 0x61,
-	0x74, 0x61, 0x1a, 0x13, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74,
-	0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x22, 0x00, 0x12, 0x30, 0x0a, 0x0a, 0x55, 0x70, 0x64,
-	0x61, 0x74, 0x65, 0x44, 0x61, 0x74, 0x61, 0x12, 0x0b, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x44, 0x61, 0x74, 0x61, 0x1a, 0x13, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x55, 0x70, 0x64,
-	0x61, 0x74, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x22, 0x00, 0x42, 0x07, 0x5a, 0x05, 0x2f,
-	0x67, 0x61, 0x74, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x74, 0x61, 0x1a, 0x0d, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x52, 0x65, 0x73, 0x75, 0x6c,
+	0x74, 0x22, 0x00, 0x12, 0x2a, 0x0a, 0x0a, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x44, 0x61, 0x74,
+	0x61, 0x12, 0x0b, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x44, 0x61, 0x74, 0x61, 0x1a, 0x0d,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x22, 0x00, 0x42,
+	0x07, 0x5a, 0x05, 0x2f, 0x67, 0x61, 0x74, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -309,21 +258,20 @@ func file_gate_gate_proto_rawDescGZIP() []byte {
 	return file_gate_gate_proto_rawDescData
 }
 
-var file_gate_gate_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_gate_gate_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_gate_gate_proto_goTypes = []interface{}{
-	(*KeyData)(nil),      // 0: proto.KeyData
-	(*ValueData)(nil),    // 1: proto.ValueData
-	(*DeleteResult)(nil), // 2: proto.DeleteResult
-	(*Data)(nil),         // 3: proto.Data
-	(*UpdateResult)(nil), // 4: proto.UpdateResult
+	(*KeyData)(nil),   // 0: proto.KeyData
+	(*ValueData)(nil), // 1: proto.ValueData
+	(*Result)(nil),    // 2: proto.Result
+	(*Data)(nil),      // 3: proto.Data
 }
 var file_gate_gate_proto_depIdxs = []int32{
 	0, // 0: proto.Gate.GetData:input_type -> proto.KeyData
 	0, // 1: proto.Gate.DeleteData:input_type -> proto.KeyData
 	3, // 2: proto.Gate.UpdateData:input_type -> proto.Data
 	1, // 3: proto.Gate.GetData:output_type -> proto.ValueData
-	2, // 4: proto.Gate.DeleteData:output_type -> proto.DeleteResult
-	4, // 5: proto.Gate.UpdateData:output_type -> proto.UpdateResult
+	2, // 4: proto.Gate.DeleteData:output_type -> proto.Result
+	2, // 5: proto.Gate.UpdateData:output_type -> proto.Result
 	3, // [3:6] is the sub-list for method output_type
 	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -362,7 +310,7 @@ func file_gate_gate_proto_init() {
 			}
 		}
 		file_gate_gate_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteResult); i {
+			switch v := v.(*Result); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -385,18 +333,6 @@ func file_gate_gate_proto_init() {
 				return nil
 			}
 		}
-		file_gate_gate_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpdateResult); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -404,7 +340,7 @@ func file_gate_gate_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_gate_gate_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
@@ -431,8 +367,8 @@ const _ = grpc.SupportPackageIsVersion6
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
 type GateClient interface {
 	GetData(ctx context.Context, in *KeyData, opts ...grpc.CallOption) (*ValueData, error)
-	DeleteData(ctx context.Context, in *KeyData, opts ...grpc.CallOption) (*DeleteResult, error)
-	UpdateData(ctx context.Context, in *Data, opts ...grpc.CallOption) (*UpdateResult, error)
+	DeleteData(ctx context.Context, in *KeyData, opts ...grpc.CallOption) (*Result, error)
+	UpdateData(ctx context.Context, in *Data, opts ...grpc.CallOption) (*Result, error)
 }
 
 type gateClient struct {
@@ -452,8 +388,8 @@ func (c *gateClient) GetData(ctx context.Context, in *KeyData, opts ...grpc.Call
 	return out, nil
 }
 
-func (c *gateClient) DeleteData(ctx context.Context, in *KeyData, opts ...grpc.CallOption) (*DeleteResult, error) {
-	out := new(DeleteResult)
+func (c *gateClient) DeleteData(ctx context.Context, in *KeyData, opts ...grpc.CallOption) (*Result, error) {
+	out := new(Result)
 	err := c.cc.Invoke(ctx, "/proto.Gate/DeleteData", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -461,8 +397,8 @@ func (c *gateClient) DeleteData(ctx context.Context, in *KeyData, opts ...grpc.C
 	return out, nil
 }
 
-func (c *gateClient) UpdateData(ctx context.Context, in *Data, opts ...grpc.CallOption) (*UpdateResult, error) {
-	out := new(UpdateResult)
+func (c *gateClient) UpdateData(ctx context.Context, in *Data, opts ...grpc.CallOption) (*Result, error) {
+	out := new(Result)
 	err := c.cc.Invoke(ctx, "/proto.Gate/UpdateData", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -473,8 +409,8 @@ func (c *gateClient) UpdateData(ctx context.Context, in *Data, opts ...grpc.Call
 // GateServer is the server API for Gate service.
 type GateServer interface {
 	GetData(context.Context, *KeyData) (*ValueData, error)
-	DeleteData(context.Context, *KeyData) (*DeleteResult, error)
-	UpdateData(context.Context, *Data) (*UpdateResult, error)
+	DeleteData(context.Context, *KeyData) (*Result, error)
+	UpdateData(context.Context, *Data) (*Result, error)
 }
 
 // UnimplementedGateServer can be embedded to have forward compatible implementations.
@@ -484,10 +420,10 @@ type UnimplementedGateServer struct {
 func (*UnimplementedGateServer) GetData(context.Context, *KeyData) (*ValueData, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetData not implemented")
 }
-func (*UnimplementedGateServer) DeleteData(context.Context, *KeyData) (*DeleteResult, error) {
+func (*UnimplementedGateServer) DeleteData(context.Context, *KeyData) (*Result, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteData not implemented")
 }
-func (*UnimplementedGateServer) UpdateData(context.Context, *Data) (*UpdateResult, error) {
+func (*UnimplementedGateServer) UpdateData(context.Context, *Data) (*Result, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateData not implemented")
 }
 

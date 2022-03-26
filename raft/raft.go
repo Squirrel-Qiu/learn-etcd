@@ -27,7 +27,9 @@ const (
 )
 
 type Raft interface {
-	UpdateData(key, value []byte) bool
+	GetData(key []byte) (value []byte, err error)
+	UpdateData(key, value []byte) error
+	DeleteData(key []byte) error
 }
 
 func (t StateType) String() string {
@@ -483,21 +485,52 @@ func minIndex(x, y uint64) uint64 {
 	return y
 }
 
-func (r *raft) UpdateData(key, value []byte) bool {
+func (r *raft) GetData(key []byte) (value []byte, err error) {
+	return r.kvSto.Get(key)
+}
+
+func (r *raft) UpdateData(key, value []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.dlog("收到添加指令{Key:%s, Value:%s}", key, value)
 	if r.state == StateLeader {
-		// add entry into logStorage before kvStorage
+		// update entry into logStorage before kvStorage
 		data := &pb.Data{Key: key, Value: value}
-		r.logSto.AppendEntry(&pb.Entry{
+		if err := r.logSto.AppendEntry(&pb.Entry{
 			Term: r.Term,
-			Type: 0,
+			Type: pb.MsgType_MsgUpdate,
 			Data: data,
-		})
-		r.kvSto.Add(key, value)
-		return true
+		}); err != nil {
+			return err
+		}
+
+		if err := r.kvSto.Add(key, value); err != nil {
+			return err
+		}
 	}
-	return false
+	return nil
+}
+
+func (r *raft) DeleteData(key []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.dlog("收到删除指令")
+	if r.state == StateLeader {
+		// update entry into logStorage before kvStorage
+		data := &pb.Data{Key: key}
+		if err := r.logSto.DeleteEntry(&pb.Entry{
+			Term: r.Term,
+			Type: pb.MsgType_MsgDelete,
+			Data: data,
+		}); err != nil {
+			return err
+		}
+
+		if err := r.kvSto.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
 }

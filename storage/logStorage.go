@@ -12,8 +12,9 @@ import (
 type LogStorage interface {
 	GetAllEntries() []*pb.Entry
 	GetEntriesFromCommitIndex() []*pb.Entry
-	AppendEntry(entry *pb.Entry)
+	AppendEntry(entry *pb.Entry) error
 	AppendEntriesFromIndex(x uint64, newEntries []*pb.Entry)
+	DeleteEntry(entry *pb.Entry) error
 
 	GetCommitIndex() uint64
 	SetCommitIndex(commitIndex uint64)
@@ -76,10 +77,10 @@ func (s *RaftLogImpl) GetEntriesFromCommitIndex() []*pb.Entry {
 	return s.ents
 }
 
-func (s *RaftLogImpl) AppendEntry(entry *pb.Entry) {
+func (s *RaftLogImpl) AppendEntry(entry *pb.Entry) error {
 	s.Lock()
 	defer s.Unlock()
-	s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists([]byte("logs"))
 		if err != nil {
 			return err
@@ -101,10 +102,42 @@ func (s *RaftLogImpl) AppendEntry(entry *pb.Entry) {
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *RaftLogImpl) AppendEntriesFromIndex(x uint64, newEntries []*pb.Entry) {
 	s.ents = append(s.ents[:x], newEntries...)
+}
+
+func (s *RaftLogImpl) DeleteEntry(entry *pb.Entry) error {
+	s.Lock()
+	defer s.Unlock()
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("logs"))
+
+		s.lastLogIndex += 1
+		s.lastLogTerm = entry.Term
+		entry.Index = s.lastLogIndex
+
+		value, err2 := proto.Marshal(entry)
+		if err2 != nil {
+			log.Fatalf("marshal entry failed: %v", err2)
+		}
+
+		k := strconv.FormatUint(s.lastLogIndex, 10)
+		if err3 := bucket.Put([]byte(k), value); err3 != nil {
+			return err3
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *RaftLogImpl) GetCommitIndex() uint64 {

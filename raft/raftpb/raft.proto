@@ -22,13 +22,14 @@ message RequestVoteReply{
 }
 
 enum MsgType {
-  MsgUpdate = 0;
-  MsgDelete = 1;
+  MsgGet = 0;
+  MsgUpdate = 1;
+  MsgDelete = 2;
 }
 
 message Data {
-  bytes Key = 2;
-  bytes Value = 3;
+  bytes Key = 1;
+  bytes Value = 2;
 }
 
 message Entry {

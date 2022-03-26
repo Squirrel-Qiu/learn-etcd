@@ -5,9 +5,9 @@ import (
 )
 
 type KVStorage interface {
-	Get(key []byte) (value []byte)
-	Add(key, value []byte)
-	Delete(key []byte)
+	Get(key []byte) (value []byte, err error)
+	Add(key, value []byte) error
+	Delete(key []byte) error
 }
 
 type KVImpl struct {
@@ -20,17 +20,22 @@ func NewKVStorage(db *bolt.DB) *KVImpl {
 	}
 }
 
-func (s KVImpl) Get(key []byte) (value []byte) {
-	s.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("kv-data"))
+func (s KVImpl) Get(key []byte) (value []byte, err error) {
+	if err = s.db.View(func(tx *bolt.Tx) error {
+		bucket, err2 := tx.CreateBucketIfNotExists([]byte("kv-data"))
+		if err2 != nil {
+			return err2
+		}
 		value = bucket.Get(key)
 		return nil
-	})
-	return value
+	}); err != nil {
+		return nil, err
+	}
+	return value, nil
 }
 
-func (s KVImpl) Add(key, value []byte) {
-	s.db.Update(func(tx *bolt.Tx) error {
+func (s KVImpl) Add(key, value []byte) error {
+	if err := s.db.Update(func(tx *bolt.Tx) error {
 		bucket, err2 := tx.CreateBucketIfNotExists([]byte("kv-data"))
 		if err2 != nil {
 			return err2
@@ -40,19 +45,22 @@ func (s KVImpl) Add(key, value []byte) {
 			return err3
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s KVImpl) Delete(key []byte) {
-	s.db.Update(func(tx *bolt.Tx) error {
-		bucket, err2 := tx.CreateBucketIfNotExists([]byte("kv-data"))
-		if err2 != nil {
+func (s KVImpl) Delete(key []byte) error {
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("kv-data"))
+
+		if err2 := bucket.Delete(key); err2 != nil {
 			return err2
 		}
-
-		if err3 := bucket.Delete(key); err3 != nil {
-			return err3
-		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }

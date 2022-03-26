@@ -6,27 +6,23 @@ option go_package = "/gate";
 
 service Gate {
   rpc GetData(KeyData) returns (ValueData) {}
-  rpc DeleteData(KeyData) returns (DeleteResult) {}
-  rpc UpdateData(Data) returns (UpdateResult) {}
+  rpc DeleteData(KeyData) returns (Result) {}
+  rpc UpdateData(Data) returns (Result) {}
 }
 
 message KeyData {
-  repeated bytes Key = 1;
+  bytes Key = 1;
 }
 
 message ValueData {
-  repeated bytes Value = 1;
+  bytes Value = 1;
 }
 
-message DeleteResult {
+message Result {
   bool Success = 1;
 }
 
 message Data {
   bytes Key = 1;
   bytes Value = 2;
-}
-
-message UpdateResult {
-  bool Success = 1;
 }

@@ -9,16 +9,28 @@ type gate struct {
 	raft raft.Raft
 }
 
-func (g *gate) GetData(ctx context.Context, keyDatas *KeyData) (valueDatas *ValueData, err error) {
+func (g *gate) GetData(ctx context.Context, key *KeyData) (value *ValueData, err error) {
+	v, err := g.raft.GetData(key.Key)
+	if err != nil {
+		return nil, err
+	}
+	return &ValueData{Value: v}, nil
 }
 
-func (g *gate) DeleteData(ctx context.Context, keyDatas *KeyData) (deleteResult *DeleteResult, err error) {
+func (g *gate) DeleteData(ctx context.Context, key *KeyData) (deleteResult *Result, err error) {
+	deleteResult = &Result{Success: true}
+	if err = g.raft.DeleteData(key.Key); err != nil {
+		deleteResult.Success = false
+		return deleteResult, err
+	}
+	return deleteResult, nil
 }
 
-func (g *gate) UpdateData(ctx context.Context, data *Data) (updateResult *UpdateResult, err error) {
-	updateResult = &UpdateResult{Success: false}
-	if g.raft.UpdateData(data.Key, data.Value) {
-		updateResult.Success = true
+func (g *gate) UpdateData(ctx context.Context, data *Data) (updateResult *Result, err error) {
+	updateResult = &Result{Success: true}
+	if err = g.raft.UpdateData(data.Key, data.Value); err != nil {
+		updateResult.Success = false
+		return updateResult, err
 	}
 	return updateResult, nil
 }
