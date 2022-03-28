@@ -71,16 +71,16 @@ type raft struct {
 	matchIndex map[uint64]uint64
 }
 
-func initDB() *bolt.DB {
-	db, err := bolt.Open("/home/squirrel/git/learn-etcd/test.db", 0600, &bolt.Options{Timeout: 3 * time.Second})
-	if err != nil {
-		log.Fatalf("%+v", err)
-	}
-	return db
-}
+//func initDB() *bolt.DB {
+//	db, err := bolt.Open("/home/squirrel/git/learn-etcd/test02.db", 0600, &bolt.Options{Timeout: 3 * time.Second})
+//	if err != nil {
+//		log.Fatalf("bolt open failed: %v", err)
+//	}
+//	return db
+//}
 
-func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]*grpc.ClientConn, server *Server, ready <-chan struct{}) *raft {
-	db := initDB()
+func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]*grpc.ClientConn, server *Server, ready <-chan struct{}, db *bolt.DB) *raft {
+	//db := initDB()
 	r := &raft{
 		id:               id,
 		state:            StateFollower,
@@ -153,11 +153,11 @@ func (r *raft) runElectionTimeout() {
 		}
 
 		// 收到心跳任期改变
-		if termStarted != r.Term {
-			r.dlog("选举定时器的term从 %d 变为 %d, 退出", termStarted, r.Term)
-			r.mu.Unlock()
-			return
-		}
+		//if termStarted != r.Term {
+		//	r.dlog("选举定时器的term从 %d 变为 %d, 退出", termStarted, r.Term)
+		//	r.mu.Unlock()
+		//	return
+		//}
 
 		// 超时
 		if elapsed := time.Since(r.electionResetEvent); elapsed >= timeoutDuration {
@@ -188,7 +188,7 @@ func (r *raft) startElection() {
 	currentTerm := r.Term
 	r.VotedFor = r.id
 	r.electionResetEvent = time.Now()
-	r.dlog("成为候选人 term=%d , 开始发起选举运动", currentTerm)
+	r.dlog("成为候选人 term=%d , 开始发起选举运动--------------------------", currentTerm)
 
 	var votesReceived uint64 = 1
 
@@ -228,6 +228,7 @@ func (r *raft) startElection() {
 						votes := int(atomic.AddUint64(&votesReceived, 1))
 						if votes > (len(r.peerIds)+1)/2 {
 							r.dlog("以 %d 票数当选Leader", votes)
+
 							r.becomeLeader()
 							return
 						}
@@ -252,7 +253,7 @@ func (r *raft) becomeLeader() {
 	r.state = StateLeader
 
 	for _, peerId := range r.peerIds {
-		r.nextIndex[peerId] = uint64(len(r.logSto.GetAllEntries()) + 1)
+		r.nextIndex[peerId] = r.logSto.GetCommitIndex() + 1
 	}
 	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v", r.Term, r.nextIndex, r.matchIndex)
 
@@ -289,11 +290,11 @@ func (r *raft) sendHeartbeats() {
 			preLogIndex := x - 1
 			var preLogTerm uint64
 			var entries []*pb.Entry
-			if preLogIndex > 0 && preLogIndex <= uint64(len(logs)) {
+			if preLogIndex > 0 && preLogIndex <= r.logSto.GetLastLogIndex() {
 				preLogTerm = logs[preLogIndex-1].Term
 				entries = logs[preLogIndex:]
-			} else if preLogIndex == 0 && len(logs) != 0 {
-				//preLogTerm = logs[preLogIndex].Term
+			} else if preLogIndex == 0 && r.logSto.GetLastLogIndex() != 0 {
+				//preLogTerm = logs[preLogIndex].Term = 0
 				entries = logs[preLogIndex:]
 			}
 
@@ -333,7 +334,8 @@ func (r *raft) sendHeartbeats() {
 						r.dlog("收到 %d AppendEntries添加成功的响应: nextIndex= %v, matchIndex= %v", peerId, r.nextIndex[peerId], r.matchIndex[peerId])
 
 						// 检查是否有可提交的指令
-						for i := leaderCommit + 1; i <= uint64(len(logs)); i++ {
+						for i := leaderCommit + 1; i <= r.logSto.GetLastLogIndex(); i++ {
+							// 只能提交当前任期的日志???
 							if logs[i-1].Term == currentTerm {
 								matchCount := 1 // Leader自己的
 								for _, p := range r.peerIds {
@@ -350,7 +352,6 @@ func (r *raft) sendHeartbeats() {
 						// if ok commit
 						if r.logSto.GetCommitIndex() != leaderCommit {
 							r.dlog("提交日志, Leader的commitIndex变为 %d", r.logSto.GetCommitIndex())
-							// TODO commit notify
 						}
 					} else {
 						r.nextIndex[peerId] = x - 1
@@ -430,15 +431,7 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 		if len(args.Entries) == 0 {
 			reply.Success = true
 			r.dlog("没有日志要添加, 单纯维持心跳")
-		} else if args.PreLogIndex == 0 && len(logs) != 0 {
-			reply.Success = true
-			// Leader日志为空, Follower不为空服从为空
-			// TODO
-		} else if args.PreLogIndex != 0 && len(logs) == 0 {
-			reply.Success = true
-			r.dlog("从索引 %d 处开始插入以下日志 %v", 0, args.Entries)
-			r.logSto.AppendEntriesFromIndex(0, args.Entries)
-		} else if args.PreLogIndex == 0 || args.PreLogIndex <= uint64(len(logs)) && args.PreLogTerm == logs[args.PreLogIndex-1].Term {
+		} else if args.PreLogIndex == 0 || args.PreLogIndex <= r.logSto.GetLastLogIndex() && args.PreLogTerm == logs[args.PreLogIndex-1].Term {
 			reply.Success = true
 
 			// 寻找插入点
@@ -446,7 +439,7 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 			newEntriesIndex := 0
 
 			for {
-				if logInsertPosition >= uint64(len(logs)) || newEntriesIndex >= len(args.Entries) {
+				if logInsertPosition >= r.logSto.GetLastLogIndex() || newEntriesIndex >= len(args.Entries) {
 					break
 				}
 				if logs[logInsertPosition].Term != args.Entries[newEntriesIndex].Term {
@@ -466,10 +459,21 @@ func (r *raft) AppendEntries(ctx context.Context, args *pb.AppendEntriesArgs) (r
 		}
 
 		if args.LeaderCommit > r.logSto.GetCommitIndex() {
-			ci := minIndex(args.LeaderCommit, uint64(len(r.logSto.GetAllEntries())))
+			newLogs := r.logSto.GetAllEntries()
+			ci := minIndex(args.LeaderCommit, r.logSto.GetLastLogIndex())
+
+			r.dlog("将committed的日志里的数据操作提取到 data-bucket")
+			for _, entry := range newLogs[r.logSto.GetCommitIndex():ci] {
+				switch entry.Type {
+				case pb.MsgType_MsgUpdate:
+					r.kvSto.Add(entry.Data.Key, entry.Data.Value)
+				case pb.MsgType_MsgDelete:
+					r.kvSto.Delete(entry.Data.Key)
+				}
+			}
+
 			r.logSto.SetCommitIndex(ci)
 			r.dlog("commitIndex变为 %d", ci)
-			// TODO
 		}
 	}
 
@@ -485,11 +489,11 @@ func minIndex(x, y uint64) uint64 {
 	return y
 }
 
-func (r *raft) GetData(key []byte) (value []byte, err error) {
+func (r *raft) GetData(key []byte) (value []byte) {
 	return r.kvSto.Get(key)
 }
 
-func (r *raft) UpdateData(key, value []byte) error {
+func (r *raft) UpdateData(key, value []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -497,19 +501,14 @@ func (r *raft) UpdateData(key, value []byte) error {
 	if r.state == StateLeader {
 		// update entry into logStorage before kvStorage
 		data := &pb.Data{Key: key, Value: value}
-		if err := r.logSto.AppendEntry(&pb.Entry{
+		r.logSto.AppendEntry(&pb.Entry{
 			Term: r.Term,
 			Type: pb.MsgType_MsgUpdate,
 			Data: data,
-		}); err != nil {
-			return err
-		}
+		})
 
-		if err := r.kvSto.Add(key, value); err != nil {
-			return err
-		}
+		r.kvSto.Add(key, value)
 	}
-	return nil
 }
 
 func (r *raft) DeleteData(key []byte) error {
@@ -520,17 +519,13 @@ func (r *raft) DeleteData(key []byte) error {
 	if r.state == StateLeader {
 		// update entry into logStorage before kvStorage
 		data := &pb.Data{Key: key}
-		if err := r.logSto.DeleteEntry(&pb.Entry{
+		r.logSto.AppendEntry(&pb.Entry{
 			Term: r.Term,
 			Type: pb.MsgType_MsgDelete,
 			Data: data,
-		}); err != nil {
-			return err
-		}
+		})
 
-		if err := r.kvSto.Delete(key); err != nil {
-			return err
-		}
+		r.kvSto.Delete(key)
 	}
 	return nil
 }

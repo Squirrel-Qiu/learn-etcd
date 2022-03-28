@@ -2,6 +2,7 @@ package raft
 
 import (
 	pb "github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
+	bolt "go.etcd.io/bbolt"
 	"google.golang.org/grpc"
 	"log"
 	"net"
@@ -39,9 +40,9 @@ func NewServer(serverId uint64, peerIds []uint64, ready <-chan struct{}) *Server
 	return s
 }
 
-func (s *Server) Serve() {
+func (s *Server) Serve(db *bolt.DB) {
 	s.mu.Lock()
-	s.r = newRaft(s.serverId, s.peerIds, s.peerClients, s, s.ready)
+	s.r = newRaft(s.serverId, s.peerIds, s.peerClients, s, s.ready, db)
 
 	s.rpcServer = grpc.NewServer()
 	pb.RegisterRaftServer(s.rpcServer, s.r)
@@ -53,7 +54,7 @@ func (s *Server) Serve() {
 	var err error
 	s.listener, err = net.Listen("tcp", ":0")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("listen failed: %v", err)
 	}
 	log.Printf("server [%v] listening at %s", s.serverId, s.listener.Addr())
 

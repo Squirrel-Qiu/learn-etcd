@@ -1,7 +1,7 @@
 package raft
 
 import (
-	"github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
+	bolt "go.etcd.io/bbolt"
 	"log"
 	"math/rand"
 	"testing"
@@ -33,6 +33,12 @@ func NewHarness(t *testing.T, n int) *Harness {
 	connected := make([]bool, n+1)
 	ready := make(chan struct{})
 
+	// TODO tmp
+	db, err := bolt.Open("/home/squirrel/git/learn-etcd/test02.db", 0600, &bolt.Options{Timeout: 3 * time.Second})
+	if err != nil {
+		log.Fatalf("bolt open failed: %v", err)
+	}
+
 	// Create all Servers in this cluster, assign ids and peer ids.
 	// 创建集群中的所有机器，分配ID和同伴ID
 	for i := 1; i <= n; i++ {
@@ -44,7 +50,7 @@ func NewHarness(t *testing.T, n int) *Harness {
 		}
 
 		ns[i] = NewServer(uint64(i), peerIds, ready)
-		ns[i].Serve()
+		ns[i].Serve(db)
 	}
 
 	// Connect all peers to each other.
@@ -106,13 +112,5 @@ func (h *Harness) Shutdown() {
 		// shutdown the server
 		h.cluster[i].Shutdown()
 	}
-}
-
-func (h *Harness) SubmitToServer(serverId uint64, data []raftpb.Data) bool {
-	return h.cluster[serverId].r.UpdataData(data)
-}
-
-func (h *Harness) GetLeaderEntries(leaderId uint64) []*raftpb.Entry {
-	ents := h.cluster[leaderId].r.logSto.GetAllEntries()
-	return ents
+	//defer initDB().Close()
 }

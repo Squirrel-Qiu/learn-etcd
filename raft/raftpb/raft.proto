@@ -22,9 +22,8 @@ message RequestVoteReply{
 }
 
 enum MsgType {
-  MsgGet = 0;
-  MsgUpdate = 1;
-  MsgDelete = 2;
+  MsgUpdate = 0;
+  MsgDelete = 1;
 }
 
 message Data {

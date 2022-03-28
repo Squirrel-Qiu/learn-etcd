@@ -2,12 +2,13 @@ package storage
 
 import (
 	bolt "go.etcd.io/bbolt"
+	"log"
 )
 
 type KVStorage interface {
-	Get(key []byte) (value []byte, err error)
-	Add(key, value []byte) error
-	Delete(key []byte) error
+	Get(key []byte) (value []byte)
+	Add(key, value []byte)
+	Delete(key []byte)
 }
 
 type KVImpl struct {
@@ -15,52 +16,53 @@ type KVImpl struct {
 }
 
 func NewKVStorage(db *bolt.DB) *KVImpl {
+	db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("kv-data"))
+		if err != nil {
+			log.Fatalf("get data-bucket failed: %v", err)
+		}
+
+		return nil
+	})
+
 	return &KVImpl{
 		db: db,
 	}
 }
 
-func (s KVImpl) Get(key []byte) (value []byte, err error) {
-	if err = s.db.View(func(tx *bolt.Tx) error {
-		bucket, err2 := tx.CreateBucketIfNotExists([]byte("kv-data"))
-		if err2 != nil {
-			return err2
-		}
-		value = bucket.Get(key)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return value, nil
-}
-
-func (s KVImpl) Add(key, value []byte) error {
-	if err := s.db.Update(func(tx *bolt.Tx) error {
-		bucket, err2 := tx.CreateBucketIfNotExists([]byte("kv-data"))
-		if err2 != nil {
-			return err2
-		}
-
-		if err3 := bucket.Put(key, value); err3 != nil {
-			return err3
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s KVImpl) Delete(key []byte) error {
-	if err := s.db.Update(func(tx *bolt.Tx) error {
+func (s KVImpl) Get(key []byte) (value []byte) {
+	s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("kv-data"))
 
-		if err2 := bucket.Delete(key); err2 != nil {
-			return err2
+		value = bucket.Get(key)
+		return nil
+	})
+
+	return value
+}
+
+func (s KVImpl) Add(key, value []byte) {
+	s.db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte("kv-data"))
+		if err != nil {
+			log.Fatalf("get data-bucket failed: %v", err)
+		}
+
+		if err2 := bucket.Put(key, value); err2 != nil {
+			log.Fatalf("put data into bucket failed: %v", err2)
+		}
+
+		return nil
+	})
+}
+
+func (s KVImpl) Delete(key []byte) {
+	s.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("kv-data"))
+
+		if err := bucket.Delete(key); err != nil {
+			log.Fatalf("delete data failed: %v", err)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
