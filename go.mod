@@ -1,6 +1,6 @@
 module github.com/Squirrel-Qiu/learn-etcd
 
-go 1.17
+go 1.18
 
 require (
 	go.etcd.io/bbolt v1.3.6

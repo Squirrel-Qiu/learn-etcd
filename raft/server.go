@@ -1,11 +1,14 @@
 package raft
 
 import (
-	pb "github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
-	bolt "go.etcd.io/bbolt"
+	"github.com/Squirrel-Qiu/learn-etcd/ch_request"
+	"github.com/Squirrel-Qiu/learn-etcd/gate"
+	net2 "github.com/Squirrel-Qiu/learn-etcd/net"
+	"github.com/Squirrel-Qiu/learn-etcd/proto"
 	"google.golang.org/grpc"
 	"log"
 	"net"
+	"strconv"
 	"sync"
 )
 
@@ -13,9 +16,10 @@ type Server struct {
 	mu sync.Mutex
 
 	serverId uint64
-	//peerIds  []uint64
 
-	r *raft
+	r  *raft
+	g  *net2.Rpc
+	ga *gate.Gate
 
 	rpcServer *grpc.Server
 	listener  net.Listener
@@ -37,22 +41,29 @@ func NewServer(serverId uint64, peerIds []uint64, ready <-chan struct{}) *Server
 		ready:       ready,
 		quit:        make(chan struct{}),
 	}
+
+	voteReqCh := make(chan ch_request.VoteReqStruct, 1)
+	entryReqCh := make(chan ch_request.EntryStruct, 1)
+
+	getDataCh := make(chan ch_request.GetDataStruct, 1)
+	deleteDataCh := make(chan ch_request.DeleteDataStruct, 1)
+	updateDataCh := make(chan ch_request.UpdateDataStruct, 1)
+
+	s.r = newRaft(s.serverId, s.peerIds, s.peerClients, s, s.ready, voteReqCh, entryReqCh, getDataCh, deleteDataCh, updateDataCh)
+	s.g = net2.NewRpc(voteReqCh, entryReqCh)
+	s.ga = gate.NewGate(getDataCh, deleteDataCh, updateDataCh)
+
+	s.rpcServer = grpc.NewServer()
+	proto.RegisterRPCommServer(s.rpcServer, s.g)
+	proto.RegisterGateServer(s.rpcServer, s.ga)
+
 	return s
 }
 
-func (s *Server) Serve(db *bolt.DB) {
-	s.mu.Lock()
-	s.r = newRaft(s.serverId, s.peerIds, s.peerClients, s, s.ready, db)
-
-	s.rpcServer = grpc.NewServer()
-	pb.RegisterRaftServer(s.rpcServer, s.r)
-	//s.rpcProxy = &RPCProxy{r: s.r}	// rpc.Register: method has 1 input parameters; needs exactly three.
-	//s.rpcServer.RegisterName("Raft", s.r)
-
-	s.mu.Unlock()
-
+func (s *Server) Serve() {
 	var err error
-	s.listener, err = net.Listen("tcp", ":0")
+	addr := "127.0.0.1:4314" + strconv.FormatUint(s.serverId, 10)
+	s.listener, err = net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("listen failed: %v", err)
 	}
@@ -86,8 +97,8 @@ func (s *Server) Serve(db *bolt.DB) {
 }
 
 func (s *Server) ConnectToPeer(peerId uint64, addr net.Addr) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	//s.mu.Lock()
+	//defer s.mu.Unlock()
 	if s.peerClients[peerId] == nil {
 		client, err := grpc.Dial(addr.String(), grpc.WithInsecure())
 		if err != nil {
@@ -99,14 +110,14 @@ func (s *Server) ConnectToPeer(peerId uint64, addr net.Addr) error {
 }
 
 func (s *Server) GetListenAddr() net.Addr {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	//s.mu.Lock()
+	//defer s.mu.Unlock()
 	return s.listener.Addr()
 }
 
 func (s *Server) DisconnectAll() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	//s.mu.Lock()
+	//defer s.mu.Unlock()
 	for id := range s.peerClients {
 		if s.peerClients[id] != nil {
 			s.peerClients[id].Close()

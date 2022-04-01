@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package raftpb;
+package proto;
 
-option go_package = "/raftpb";
+option go_package = "/proto";
 
-service Raft {
+service RPComm {
   rpc RequestVote(RequestVoteArgs) returns (RequestVoteReply) {}
   rpc AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply) {}
 }

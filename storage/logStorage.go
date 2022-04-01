@@ -1,7 +1,7 @@
 package storage
 
 import (
-	pb "github.com/Squirrel-Qiu/learn-etcd/raft/raftpb"
+	pb "github.com/Squirrel-Qiu/learn-etcd/proto"
 	bolt "go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
 	"log"
@@ -61,7 +61,7 @@ func (s *RaftLogImpl) GetAllEntries() []*pb.Entry {
 	s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("logs"))
 
-		for i := uint64(1); i < s.lastLogIndex; i++ {
+		for i := uint64(1); i <= s.lastLogIndex; i++ {
 			k := strconv.FormatUint(i, 10)
 			v := bucket.Get([]byte(k))
 

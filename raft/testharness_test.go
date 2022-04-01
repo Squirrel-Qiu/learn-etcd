@@ -1,7 +1,6 @@
 package raft
 
 import (
-	bolt "go.etcd.io/bbolt"
 	"log"
 	"math/rand"
 	"testing"
@@ -33,12 +32,6 @@ func NewHarness(t *testing.T, n int) *Harness {
 	connected := make([]bool, n+1)
 	ready := make(chan struct{})
 
-	// TODO tmp
-	db, err := bolt.Open("/home/squirrel/git/learn-etcd/test02.db", 0600, &bolt.Options{Timeout: 3 * time.Second})
-	if err != nil {
-		log.Fatalf("bolt open failed: %v", err)
-	}
-
 	// Create all Servers in this cluster, assign ids and peer ids.
 	// 创建集群中的所有机器，分配ID和同伴ID
 	for i := 1; i <= n; i++ {
@@ -50,7 +43,7 @@ func NewHarness(t *testing.T, n int) *Harness {
 		}
 
 		ns[i] = NewServer(uint64(i), peerIds, ready)
-		ns[i].Serve(db)
+		ns[i].Serve()
 	}
 
 	// Connect all peers to each other.
@@ -77,8 +70,8 @@ func NewHarness(t *testing.T, n int) *Harness {
 // Returns the leader's id and term. It retries several times if no leader is
 // identified yet.
 func (h *Harness) CheckSingleLeader() (leaderId uint64, leaderTerm uint64) {
+	time.Sleep(3 * time.Second)
 	for r := 1; r <= 5; r++ {
-		//leaderTerm := 0
 		for i := 1; i <= h.n; i++ {
 			if h.connected[i] {
 				id, term, isLeader := h.cluster[i].r.Report()
@@ -95,7 +88,6 @@ func (h *Harness) CheckSingleLeader() (leaderId uint64, leaderTerm uint64) {
 		if leaderId >= 1 {
 			return leaderId, leaderTerm
 		}
-		time.Sleep(150 * time.Millisecond)
 	}
 
 	h.t.Fatalf("leader not found")

@@ -2,12 +2,12 @@ syntax = "proto3";
 
 package proto;
 
-option go_package = "/gate";
+option go_package = "/proto";
 
 service Gate {
   rpc GetData(KeyData) returns (ValueData) {}
   rpc DeleteData(KeyData) returns (Result) {}
-  rpc UpdateData(Data) returns (Result) {}
+  rpc UpdateData(ClientData) returns (Result) {}
 }
 
 message KeyData {
@@ -22,7 +22,7 @@ message Result {
   bool Success = 1;
 }
 
-message Data {
+message ClientData {
   bytes Key = 1;
   bytes Value = 2;
 }
