@@ -1,8 +1,9 @@
 package storage
 
 import (
-	bolt "go.etcd.io/bbolt"
 	"log"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 type KVStorage interface {
@@ -43,10 +44,7 @@ func (s KVImpl) Get(key []byte) (value []byte) {
 
 func (s KVImpl) Add(key, value []byte) {
 	s.db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte("kv-data"))
-		if err != nil {
-			log.Fatalf("get data-bucket failed: %v", err)
-		}
+		bucket := tx.Bucket([]byte("kv-data"))
 
 		if err2 := bucket.Put(key, value); err2 != nil {
 			log.Fatalf("put data into bucket failed: %v", err2)

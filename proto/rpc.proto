@@ -50,4 +50,5 @@ message AppendEntriesArgs {
 message AppendEntriesReply {
   uint64 Term = 1;
   bool Success = 2;
+  uint64 LogIndex = 3;
 }

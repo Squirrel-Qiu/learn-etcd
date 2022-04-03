@@ -2,13 +2,12 @@ package raft
 
 import (
 	"context"
-	"fmt"
-	pb "github.com/Squirrel-Qiu/learn-etcd/proto"
-	"google.golang.org/grpc"
-	"log"
 	"strconv"
 	"testing"
 	"time"
+
+	pb "github.com/Squirrel-Qiu/learn-etcd/proto"
+	"google.golang.org/grpc"
 )
 
 func TestElectionBasic(t *testing.T) {
@@ -22,7 +21,7 @@ func TestElectionBasic(t *testing.T) {
 	addr := "127.0.0.1:4314" + strconv.FormatUint(leaderId, 10)
 	client, err := grpc.Dial(addr, grpc.WithInsecure())
 	if err != nil {
-		log.Fatalf("client dial to raft-leader failed %v", err)
+		t.Fatalf("client dial to raft-leader failed %v", err)
 	}
 
 	data1 := &pb.ClientData{
@@ -31,7 +30,7 @@ func TestElectionBasic(t *testing.T) {
 	}
 	_, err = pb.NewGateClient(client).UpdateData(context.Background(), data1)
 	if err != nil {
-		log.Fatalf("rpc-update call failed: %v", err)
+		t.Fatalf("rpc-update call failed: %v", err)
 	}
 
 	//time.Sleep(200 * time.Millisecond)
@@ -42,17 +41,18 @@ func TestElectionBasic(t *testing.T) {
 	}
 	_, err = pb.NewGateClient(client).UpdateData(context.Background(), data2)
 	if err != nil {
-		log.Fatalf("rpc-update call failed: %v", err)
+		t.Fatalf("rpc-update call failed: %v", err)
 	}
+	t.Log("update ok")
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(900 * time.Millisecond)
 
 	key1 := &pb.KeyData{Key: []byte("squ")}
 	v1, err := pb.NewGateClient(client).GetData(context.Background(), key1)
 	if err != nil {
-		log.Fatalf("rpc-get call failed: %v", err)
+		t.Fatalf("rpc-get call failed: %v", err)
 	}
-	fmt.Println("when key=squ, value=", string(v1.Value))
+	t.Log("when key=squ, value=", string(v1.Value))
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 }

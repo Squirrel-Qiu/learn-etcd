@@ -70,7 +70,7 @@ func NewHarness(t *testing.T, n int) *Harness {
 // Returns the leader's id and term. It retries several times if no leader is
 // identified yet.
 func (h *Harness) CheckSingleLeader() (leaderId uint64, leaderTerm uint64) {
-	time.Sleep(3 * time.Second)
+	time.Sleep(6 * time.Second)
 	for r := 1; r <= 5; r++ {
 		for i := 1; i <= h.n; i++ {
 			if h.connected[i] {
@@ -97,7 +97,7 @@ func (h *Harness) CheckSingleLeader() (leaderId uint64, leaderTerm uint64) {
 func (h *Harness) Shutdown() {
 	for i := 1; i <= h.n; i++ {
 		// disconnect all clients connect with the server
-		h.cluster[i].DisconnectAll()
+		//h.cluster[i].DisconnectAll()
 		h.connected[i] = false
 	}
 	for i := 1; i <= h.n; i++ {

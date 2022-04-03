@@ -3,16 +3,17 @@ package raft
 import (
 	"context"
 	"fmt"
-	"github.com/Squirrel-Qiu/learn-etcd/ch_request"
-	"github.com/Squirrel-Qiu/learn-etcd/proto"
-	"github.com/Squirrel-Qiu/learn-etcd/storage"
-	bolt "go.etcd.io/bbolt"
-	"google.golang.org/grpc"
 	"log"
 	"math/rand"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/Squirrel-Qiu/learn-etcd/ch_request"
+	"github.com/Squirrel-Qiu/learn-etcd/proto"
+	"github.com/Squirrel-Qiu/learn-etcd/storage"
+	bolt "go.etcd.io/bbolt"
 )
 
 const DeLog = 1
@@ -52,7 +53,7 @@ type raft struct {
 	VotedFor uint64
 
 	peerIds     []uint64
-	peerClients map[uint64]*grpc.ClientConn
+	peerClients map[uint64]proto.RPCommClient
 
 	server *Server
 
@@ -74,15 +75,19 @@ type raft struct {
 }
 
 func initDB(id uint64) *bolt.DB {
-	path := "/home/squirrel/git/learn-etcd/test0" + strconv.FormatUint(id, 10) + ".db"
-	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 5 * time.Second})
+	path := "../test0" + strconv.Itoa(int(id)) + ".db"
+	db, err := bolt.Open(path, 0600, &bolt.Options{
+		Timeout:        5 * time.Second,
+		MmapFlags:      syscall.MAP_POPULATE,
+		NoFreelistSync: true,
+	})
 	if err != nil {
 		log.Fatalf("bolt open failed: %v", err)
 	}
 	return db
 }
 
-func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]*grpc.ClientConn, server *Server,
+func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]proto.RPCommClient, server *Server,
 	ready <-chan struct{}, voteReqCh chan ch_request.VoteReqStruct, entryReqCh chan ch_request.EntryStruct,
 	getDataCh chan ch_request.GetDataStruct, deleteDataCh chan ch_request.DeleteDataStruct,
 	updateDataCh chan ch_request.UpdateDataStruct) *raft {
@@ -96,7 +101,7 @@ func newRaft(id uint64, peerIds []uint64, peerClients map[uint64]*grpc.ClientCon
 		server:           server,
 		logSto:           storage.NewRaftLog(db),
 		kvSto:            storage.NewKVStorage(db),
-		heartbeatTimeout: 60 * time.Millisecond,
+		heartbeatTimeout: 100 * time.Millisecond,
 		nextIndex:        make(map[uint64]uint64),
 		matchIndex:       make(map[uint64]uint64),
 		voteReqCh:        voteReqCh,
@@ -145,14 +150,11 @@ func (r *raft) dlog(format string, args ...interface{}) {
 	3.超时
 */
 func (r *raft) runElectionTimeout() {
-	//timeoutDuration := r.electionTimeout()
 	r.mu.Lock()
 	termStarted := r.Term
 	r.mu.Unlock()
 	r.dlog("任期为%d的定时器启动", termStarted)
 
-	//ticker := time.NewTicker(10 * time.Millisecond)
-	//defer ticker.Stop()
 	for {
 		var vq ch_request.VoteReqStruct
 		var ae ch_request.EntryStruct
@@ -162,53 +164,20 @@ func (r *raft) runElectionTimeout() {
 			r.RequestVote(vq)
 		case ae = <-r.entryReqCh:
 			r.AppendEntries(ae)
-		case <-time.After(time.Duration(2000+rand.Intn(1000)) * time.Millisecond):
+		case <-time.After(time.Duration(500+rand.Intn(500)) * time.Millisecond):
 			// 超时
 			r.dlog("定时器到期, 开始新一轮选举")
 
 			r.startElection()
-			//if elapsed := time.Since(r.electionResetEvent); elapsed >= timeoutDuration {
-			//	r.mu.Unlock()
-			//	return
-			//}
 			return
 		}
-
-		//r.mu.Lock()
-		//if r.state != StateFollower && r.state != StateCandidate {
-		//	r.dlog("选举定时器的服务器状态改变 state=%s, 退出", r.state)
-		//	r.mu.Unlock()
-		//	return
-		//}
-		//r.mu.Unlock()
-
-		// 收到心跳任期改变
-		//if termStarted != r.Term {
-		//	r.dlog("选举定时器的term从 %d 变为 %d, 退出", termStarted, r.Term)
-		//	r.mu.Unlock()
-		//	return
-		//}
-
-		/*// 超时
-		if elapsed := time.Since(r.electionResetEvent); elapsed >= timeoutDuration {
-			r.dlog("选举定时器到时, 开始新一轮选举")
-			r.startElection()
-			r.mu.Unlock()
-			return
-		}
-		r.mu.Unlock()*/
 	}
 }
-
-// 生成伪随机的定时器
-//func (r *raft) electionTimeout() time.Duration {
-//	return time.Duration(150+rand.Intn(150)) * time.Millisecond
-//}
 
 // 成为candidate开始选举运动
 /*
 	等待RequestVoteReply的过程中可能出现以下情况：
-	1.状态改变
+	1.选票被均分, 重新选举
 	2.对方任期更大变为Follower
 	3.票数过半变为领导者
 */
@@ -240,26 +209,10 @@ func (r *raft) startElection() {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
 			defer cancelFunc()
 
-			if reply, err := proto.NewRPCommClient(r.peerClients[peerId]).RequestVote(ctx, args); err == nil {
+			if reply, err := r.peerClients[peerId].RequestVote(ctx, args); err == nil {
 				r.dlog("收到 %d RequestVoteReply的响应", peerId)
 
 				resultMap.Store(peerId, reply)
-
-				//if reply.Term > currentTerm {
-				//	r.dlog("收到RequestVoteReply的任期比当前任期高")
-				//	r.becomeFollower(reply.Term)
-				//	return
-				//} else if reply.Term == currentTerm {
-				//	if reply.VoteGranted {
-				//		votes := int(atomic.AddUint64(&votesReceived, 1))
-				//		if votes > (len(r.peerIds)+1)/2 {
-				//			r.dlog("以 %d 票数当选Leader==================================================", votes)
-				//
-				//			r.becomeLeader()
-				//			return
-				//		}
-				//	}
-				//}
 			}
 		}(id)
 	}
@@ -294,7 +247,6 @@ func (r *raft) startElection() {
 	if r.state == StateCandidate {
 		r.dlog("选举失败, 选票没有达标继续选举")
 		time.Sleep(time.Duration(100+rand.Intn(100)) * time.Millisecond)
-		//return
 		go r.runElectionTimeout()
 	}
 }
@@ -303,7 +255,6 @@ func (r *raft) becomeFollower(term uint64) {
 	r.state = StateFollower
 	r.Term = term
 	r.VotedFor = None
-	//r.electionResetEvent = time.Now()
 }
 
 func (r *raft) becomeLeader() {
@@ -315,12 +266,7 @@ func (r *raft) becomeLeader() {
 	r.dlog("成为Leader, term=%d, nextIndex=%v, matchIndex=%v", r.Term, r.nextIndex, r.matchIndex)
 
 	go func() {
-		//ticker := time.NewTicker(r.heartbeatTimeout)
-		//defer ticker.Stop()
-
 		for {
-			//r.sendHeartbeats()
-
 			var getData ch_request.GetDataStruct
 			var deleteData ch_request.DeleteDataStruct
 			var updateData ch_request.UpdateDataStruct
@@ -329,11 +275,9 @@ func (r *raft) becomeLeader() {
 			select {
 			case getData = <-r.getDataCh:
 				isGet = true
-
 				r.GetData(getData)
 			case deleteData = <-r.deleteDataCh:
 				r.DeleteData(deleteData)
-
 			case updateData = <-r.updateDataCh:
 				r.UpdateData(updateData)
 			case <-time.After(r.heartbeatTimeout):
@@ -362,29 +306,28 @@ func (r *raft) sendHeartbeats() {
 	r.mu.Unlock()
 
 	var wg sync.WaitGroup
-	var resultMap, entrySend sync.Map
+	var resultMap sync.Map
 
 	leaderCommit := r.logSto.GetCommitIndex()
-	logs := r.logSto.GetAllEntries()
-	var entries []*proto.Entry
 
 	for _, id := range r.peerIds {
 		wg.Add(1)
 		go func(peerId uint64) {
 			defer wg.Done()
 
-			x := r.nextIndex[peerId]
-			preLogIndex := x - 1
+			var entries []*proto.Entry
 			var preLogTerm uint64
-			if preLogIndex > 0 && preLogIndex <= r.logSto.GetLastLogIndex() {
-				preLogTerm = logs[preLogIndex-1].Term
-				entries = logs[preLogIndex:]
-			} else if preLogIndex == 0 && r.logSto.GetLastLogIndex() != 0 {
-				//preLogTerm = logs[preLogIndex].Term = 0
-				entries = logs[preLogIndex:]
-			}
 
-			entrySend.Store(peerId, len(entries))
+			x := r.nextIndex[peerId]
+			entries = r.logSto.GetEntriesFromIndex(x)
+
+			preLogIndex := x - 1
+			preLogTerm = r.logSto.GetLogTermByIndex(preLogIndex)
+			//if preLogIndex > 0 && preLogIndex <= r.logSto.GetLastLogIndex() {
+			//} else if preLogIndex == 0 && r.logSto.GetLastLogIndex() != 0 {
+			//	//preLogTerm = logs[preLogIndex].Term = 0
+			//}
+
 			args := &proto.AppendEntriesArgs{
 				Term:         currentTerm,
 				LeaderId:     r.id,
@@ -394,16 +337,18 @@ func (r *raft) sendHeartbeats() {
 				LeaderCommit: leaderCommit,
 			}
 
-			r.dlog("向服务器 %d 发送AppendEntries请求, 现日志条目长度为 %d", peerId, r.logSto.GetLastLogIndex())
+			r.dlog("向服务器 %d 发送AppendEntries请求, Leader现日志条目长度为 %d", peerId, r.logSto.GetLastLogIndex())
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
 			defer cancelFunc()
 
-			if reply, err := proto.NewRPCommClient(r.peerClients[peerId]).AppendEntries(ctx, args); err == nil {
-				r.dlog("收到[%d]AppendEntriesReply的响应", peerId)
-				//r.mu.Lock()
-				//defer r.mu.Unlock()
+			reply, err := r.peerClients[peerId].AppendEntries(ctx, args)
+			if err != nil {
+				r.dlog("rpc error: %+v", err)
+			} else {
+				r.dlog("收到[%d]AppendEntriesReply的响应: %d", peerId, reply.LogIndex)
 				resultMap.Store(peerId, reply)
+
 			}
 		}(id)
 	}
@@ -427,16 +372,14 @@ func (r *raft) sendHeartbeats() {
 
 		if r.state == StateLeader && currentTerm == reply.Term {
 			if reply.Success {
-				l, _ := entrySend.Load(peerId)
-				r.nextIndex[peerId] += uint64(l.(int))
+				r.nextIndex[peerId] = reply.LogIndex + 1
 				r.matchIndex[peerId] = r.nextIndex[peerId] - 1
 				r.dlog("收到[%d]AppendEntries添加成功的响应: nextIndex= %v, matchIndex= %v", peerId, r.nextIndex[peerId], r.matchIndex[peerId])
 
 				// 检查是否有可提交的指令
-				newLogs := r.logSto.GetAllEntries()
 				for i := leaderCommit + 1; i <= r.logSto.GetLastLogIndex(); i++ {
 					// 只能提交当前任期的日志???
-					if newLogs[i-1].Term == currentTerm {
+					if r.logSto.GetLogTermByIndex(leaderCommit) == currentTerm {
 						matchCount := 1 // Leader自己的
 						for _, p := range r.peerIds {
 							if r.matchIndex[p] >= i {
@@ -462,8 +405,6 @@ func (r *raft) sendHeartbeats() {
 }
 
 func (r *raft) RequestVote(vq ch_request.VoteReqStruct) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.state == Dead {
 		return
 	}
@@ -500,8 +441,6 @@ func (r *raft) RequestVote(vq ch_request.VoteReqStruct) {
 }
 
 func (r *raft) AppendEntries(ae ch_request.EntryStruct) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.state == Dead {
 		return
 	}
@@ -513,47 +452,48 @@ func (r *raft) AppendEntries(ae ch_request.EntryStruct) {
 	}
 
 	reply := &proto.AppendEntriesReply{
-		Term:    0,
-		Success: false,
+		Term:     0,
+		Success:  false,
+		LogIndex: ae.Args.PreLogIndex,
 	}
+	r.dlog("preLogIndex is %d", reply.LogIndex)
 
 	if ae.Args.Term == r.Term {
 		// 当Leader出现时, 其他人都是Follower (Leader唯一)
 		if r.state != StateFollower {
 			r.becomeFollower(ae.Args.Term)
 		}
-		//r.electionResetEvent = time.Now()
-
-		logs := r.logSto.GetAllEntries()
 
 		// 检查本地日志在索引-PreLogIndex处的任期是否与PreLogTerm匹配
 		if len(ae.Args.Entries) == 0 {
 			reply.Success = true
 			r.dlog("没有日志要添加, 单纯维持心跳")
-		} else if ae.Args.PreLogIndex == 0 || ae.Args.PreLogIndex <= r.logSto.GetLastLogIndex() && ae.Args.PreLogTerm == logs[ae.Args.PreLogIndex-1].Term {
+		} else if ae.Args.PreLogIndex == 0 || ae.Args.PreLogIndex <= r.logSto.GetLastLogIndex() &&
+			ae.Args.PreLogTerm == r.logSto.GetLogTermByIndex(ae.Args.PreLogIndex) {
 			reply.Success = true
 
 			// 寻找插入点
 			logInsertPosition := ae.Args.PreLogIndex
 			newEntriesIndex := 0
 
+			// 当log有部分重复时, 避免重写入
 			for {
 				if logInsertPosition >= r.logSto.GetLastLogIndex() || newEntriesIndex >= len(ae.Args.Entries) {
 					break
 				}
-				if logs[logInsertPosition].Term != ae.Args.Entries[newEntriesIndex].Term {
+				if r.logSto.GetLogTermByIndex(logInsertPosition) != ae.Args.Entries[newEntriesIndex].Term {
 					break
 				}
 				logInsertPosition++
 				newEntriesIndex++
 			}
 
-			// 循环结束时:
-			// - logInsertIndex指向本地日志结尾的下一位,或与Leader发送的日志(请求条目)之间存在冲突的索引位置的下一位
-			// - newEntriesIndex指向请求条目开始插入的索引位置
 			if newEntriesIndex < len(ae.Args.Entries) {
 				r.dlog("从索引 %d 处开始插入以下日志 %v", logInsertPosition, ae.Args.Entries[newEntriesIndex:])
+
 				r.logSto.AppendEntriesFromIndex(logInsertPosition, ae.Args.Entries[newEntriesIndex:])
+
+				reply.LogIndex = r.logSto.GetLastLogIndex()
 			}
 		}
 

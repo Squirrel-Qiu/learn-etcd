@@ -1,15 +1,16 @@
 package raft
 
 import (
+	"log"
+	"net"
+	"strconv"
+	"sync"
+
 	"github.com/Squirrel-Qiu/learn-etcd/ch_request"
 	"github.com/Squirrel-Qiu/learn-etcd/gate"
 	net2 "github.com/Squirrel-Qiu/learn-etcd/net"
 	"github.com/Squirrel-Qiu/learn-etcd/proto"
 	"google.golang.org/grpc"
-	"log"
-	"net"
-	"strconv"
-	"sync"
 )
 
 type Server struct {
@@ -25,7 +26,7 @@ type Server struct {
 	listener  net.Listener
 
 	peerIds     []uint64
-	peerClients map[uint64]*grpc.ClientConn
+	peerClients map[uint64]proto.RPCommClient
 
 	ready <-chan struct{}
 	quit  chan struct{}
@@ -37,7 +38,7 @@ func NewServer(serverId uint64, peerIds []uint64, ready <-chan struct{}) *Server
 	s := &Server{
 		serverId:    serverId,
 		peerIds:     peerIds,
-		peerClients: make(map[uint64]*grpc.ClientConn),
+		peerClients: make(map[uint64]proto.RPCommClient),
 		ready:       ready,
 		quit:        make(chan struct{}),
 	}
@@ -104,7 +105,8 @@ func (s *Server) ConnectToPeer(peerId uint64, addr net.Addr) error {
 		if err != nil {
 			return err
 		}
-		s.peerClients[peerId] = client
+
+		s.peerClients[peerId] = proto.NewRPCommClient(client)
 	}
 	return nil
 }
@@ -113,17 +115,6 @@ func (s *Server) GetListenAddr() net.Addr {
 	//s.mu.Lock()
 	//defer s.mu.Unlock()
 	return s.listener.Addr()
-}
-
-func (s *Server) DisconnectAll() {
-	//s.mu.Lock()
-	//defer s.mu.Unlock()
-	for id := range s.peerClients {
-		if s.peerClients[id] != nil {
-			s.peerClients[id].Close()
-			s.peerClients[id] = nil
-		}
-	}
 }
 
 func (s *Server) Shutdown() {

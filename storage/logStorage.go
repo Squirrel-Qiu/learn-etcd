@@ -1,17 +1,18 @@
 package storage
 
 import (
+	"log"
+	"strconv"
+	"time"
+
 	pb "github.com/Squirrel-Qiu/learn-etcd/proto"
 	bolt "go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
-	"log"
-	"strconv"
-	"sync"
 )
 
 type LogStorage interface {
 	GetAllEntries() []*pb.Entry
-	GetEntriesFromCommitIndex() []*pb.Entry
+	GetEntriesFromIndex(startIndex uint64) []*pb.Entry
 	AppendEntry(entry *pb.Entry)
 	AppendEntriesFromIndex(logInsertPosition uint64, newEntries []*pb.Entry)
 	DeleteEntry(entry *pb.Entry) error
@@ -21,20 +22,17 @@ type LogStorage interface {
 
 	GetLastLogIndex() uint64
 	GetLastLogTerm() uint64
+	GetLogTermByIndex(logIndex uint64) uint64
 }
 
 type RaftLogImpl struct {
 	db *bolt.DB
-
-	sync.Mutex
 
 	commitIndex uint64
 	lastApplied uint64
 
 	lastLogIndex uint64
 	lastLogTerm  uint64
-
-	ents []*pb.Entry
 }
 
 func NewRaftLog(db *bolt.DB) *RaftLogImpl {
@@ -48,16 +46,12 @@ func NewRaftLog(db *bolt.DB) *RaftLogImpl {
 	})
 
 	return &RaftLogImpl{
-		db:   db,
-		ents: make([]*pb.Entry, 0),
+		db: db,
 	}
 }
 
 func (s *RaftLogImpl) GetAllEntries() []*pb.Entry {
-	s.Lock()
-	defer s.Unlock()
-	s.ents = s.ents[:0]
-
+	ents := make([]*pb.Entry, 0)
 	s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("logs"))
 
@@ -69,31 +63,38 @@ func (s *RaftLogImpl) GetAllEntries() []*pb.Entry {
 			if err := proto.Unmarshal(v, entry); err != nil {
 				log.Fatalf("parse entry failed: %v", err)
 			}
-			s.ents = append(s.ents, entry)
+			ents = append(ents, entry)
 		}
 
 		return nil
 	})
-	return s.ents
+	return ents
 }
 
-func (s *RaftLogImpl) GetEntriesFromCommitIndex() []*pb.Entry {
+func (s *RaftLogImpl) GetEntriesFromIndex(startIndex uint64) []*pb.Entry {
+	ents := make([]*pb.Entry, 0)
 	s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("logs"))
-		bucket.Get([]byte(""))
+
+		for i := startIndex; i <= s.lastLogIndex; i++ {
+			k := strconv.FormatUint(i, 10)
+			v := bucket.Get([]byte(k))
+
+			entry := &pb.Entry{}
+			if err := proto.Unmarshal(v, entry); err != nil {
+				log.Fatalf("parse entry failed: %v", err)
+			}
+			ents = append(ents, entry)
+		}
+
 		return nil
 	})
-	return s.ents
+	return ents
 }
 
 func (s *RaftLogImpl) AppendEntry(entry *pb.Entry) {
-	s.Lock()
-	defer s.Unlock()
 	s.db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte("logs"))
-		if err != nil {
-			log.Fatalf("get logs-bucket failed: %v", err)
-		}
+		bucket := tx.Bucket([]byte("logs"))
 
 		s.lastLogIndex += 1
 		s.lastLogTerm = entry.Term
@@ -114,8 +115,8 @@ func (s *RaftLogImpl) AppendEntry(entry *pb.Entry) {
 }
 
 func (s *RaftLogImpl) AppendEntriesFromIndex(logInsertPosition uint64, newEntries []*pb.Entry) {
-	s.Lock()
-	defer s.Unlock()
+	updateStart := time.Now()
+
 	s.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("logs"))
 
@@ -132,15 +133,16 @@ func (s *RaftLogImpl) AppendEntriesFromIndex(logInsertPosition uint64, newEntrie
 			if err2 := bucket.Put([]byte(k), value); err2 != nil {
 				log.Fatalf("put entry into bucket failed: %v", err2)
 			}
+			logInsertPosition++
 		}
 
 		return nil
 	})
+
+	log.Printf("update time consuming: %s", time.Since(updateStart))
 }
 
 func (s *RaftLogImpl) DeleteEntry(entry *pb.Entry) error {
-	s.Lock()
-	defer s.Unlock()
 	return nil
 }
 
@@ -149,23 +151,29 @@ func (s *RaftLogImpl) GetCommitIndex() uint64 {
 }
 
 func (s *RaftLogImpl) SetCommitIndex(commitIndex uint64) {
-	s.Lock()
-	defer s.Unlock()
 	s.commitIndex = commitIndex
 }
 
 func (s *RaftLogImpl) GetLastLogIndex() uint64 {
-	s.Lock()
-	defer s.Unlock()
-	if len(s.ents) == 0 {
-		return 0
-	}
 	return s.lastLogIndex
 }
 
 func (s *RaftLogImpl) GetLastLogTerm() uint64 {
-	if len(s.ents) == 0 {
-		return 0
-	}
 	return s.lastLogTerm
+}
+
+func (s *RaftLogImpl) GetLogTermByIndex(logIndex uint64) uint64 {
+	entry := &pb.Entry{}
+
+	s.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("logs"))
+		k := strconv.FormatUint(logIndex, 10)
+		v := bucket.Get([]byte(k))
+
+		if err := proto.Unmarshal(v, entry); err != nil {
+			log.Fatalf("parse entry failed: %v", err)
+		}
+		return nil
+	})
+	return entry.Term
 }
